@@ -170,6 +170,12 @@
   }
   .time-range-input-from { z-index: 3; }
   .time-range-input-to { z-index: 4; }
+  /* Date dots: where photos exist along the timeline */
+  .time-range-ticks { position: absolute; left: 0; right: 0; top: 50%; height: 0; z-index: 2; pointer-events: none; }
+  .time-range-ticks span {
+    position: absolute; top: 0; width: 4px; height: 4px; border-radius: 50%;
+    background: #475569; transform: translate(-50%, -50%); box-shadow: 0 0 0 1px #fff;
+  }
 </style>
 </head>
 <body class="bg-slate-100 text-slate-800">
@@ -244,6 +250,8 @@
       <option value="exifjpeg">EXIF 기록 JPEG (.zip)</option>
     </select>
 
+    <button id="fovBtn" class="px-3 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50" title="촬영 방향/화각을 삼각형으로 표시">📐 화각: <span id="fovState" class="font-semibold text-slate-400">OFF</span></button>
+
     <button id="compareBtn" class="px-3 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50" title="두 사진을 좌우로 비교">⚖ 비교: <span id="compareState" class="font-semibold text-slate-400">OFF</span></button>
 
     <button id="settingsBtn" class="px-3 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50">⚙️ 설정</button>
@@ -256,8 +264,9 @@
   <div id="timeBar" class="hidden items-center gap-2 px-3 py-1.5 bg-white border-b border-slate-200 text-xs text-slate-600">
     <span class="font-medium whitespace-nowrap">🕑 시간 필터</span>
     <span id="timeFromLabel" class="font-mono whitespace-nowrap text-slate-500"></span>
-    <div id="timeRange" class="time-range flex-1 min-w-[180px] max-w-xl">
+    <div id="timeRange" class="time-range flex-1 min-w-[140px] max-w-[18rem]">
       <div class="time-range-track"></div>
+      <div id="timeTicks" class="time-range-ticks"></div>
       <div class="time-range-fill"></div>
       <input id="timeFrom" type="range" min="0" max="1000" value="0" class="time-range-input time-range-input-from" aria-label="시간 필터 시작" />
       <input id="timeTo" type="range" min="0" max="1000" value="1000" class="time-range-input time-range-input-to" aria-label="시간 필터 종료" />
@@ -507,6 +516,8 @@ const State = {
   compareUrls: [null, null], // object URLs for the two compare panels
   track: [],               // loaded GPX trackpoints [{t, lat, lng, ele}]
   geocodeCache: {},        // "lat,lng"(rounded) -> place-name string
+  _pendingView: null,      // {lat,lng,zoom} to restore after a provider switch
+  showFov: false,          // draw shooting-direction field-of-view cones on the map
 };
 
 const PERF_CAP = 800;      // above this many photos, fall back to dots for performance
@@ -634,32 +645,60 @@ function speedKmh(a, b, dtMs) {
   const hours = dtMs / 3600000;
   return (meters / 1000) / hours;
 }
+// Geodesic point `distM` metres from (lat,lng) along compass bearing `bearingDeg`.
+function destinationPoint(lat, lng, bearingDeg, distM) {
+  const R = 6371000, br = bearingDeg * Math.PI / 180, la1 = lat * Math.PI / 180, lo1 = lng * Math.PI / 180, dr = distM / R;
+  const la2 = Math.asin(Math.sin(la1) * Math.cos(dr) + Math.cos(la1) * Math.sin(dr) * Math.cos(br));
+  const lo2 = lo1 + Math.atan2(Math.sin(br) * Math.sin(dr) * Math.cos(la1), Math.cos(dr) - Math.sin(la1) * Math.sin(la2));
+  return { lat: la2 * 180 / Math.PI, lng: lo2 * 180 / Math.PI };
+}
+// Approx metres-per-pixel at a coordinate using the active map's projection.
+function metersPerPixel(a, coord) {
+  if (!a.projectPixel) return 30;
+  const base = a.projectPixel(coord); if (!base) return 30;
+  const east = { lat: coord.lat, lng: coord.lng + 0.0009 / Math.max(0.15, Math.cos(coord.lat * Math.PI / 180)) };
+  const probe = a.projectPixel(east); if (!probe) return 30;
+  const px = Math.hypot(probe.x - base.x, probe.y - base.y);
+  return px > 0 ? haversine(coord, east) / px : 30;
+}
 
 /* ---------- Outlier detection + correction ---------- */
 function processOutliers(list) {
   const T = Settings.outlierSpeed;
   list.forEach(p => { p.isOutlier = false; p.correctedGps = { ...p.originalGps }; });
 
-  // Detect spikes. Interior point: outlier when speed to AND from it both exceed T
-  // (a "there-and-back" jump). Endpoints are disambiguated against the next-inner
-  // point so we don't misflag a good endpoint whose only neighbor is the spike.
+  // "There-and-back" distance jump: far from BOTH neighbours while the neighbours
+  // stay close to each other. This ratio test is time-independent (catches a far
+  // GPS-error photo even with a large timestamp gap, where the speed test misses
+  // it) and median-free (robust even when the spike dominates a small set). The
+  // JUMP floor avoids flagging ordinary GPS jitter; collinear travel isn't flagged
+  // because there the neighbours are also far apart (dSkip stays large).
+  const JUMP = 1000; // metres
+
   for (let i = 0; i < list.length; i++) {
     const prev = list[i-1], cur = list[i], next = list[i+1];
     const sIn  = prev ? speedKmh(prev.originalGps, cur.originalGps, cur.timestamp - prev.timestamp) : null;
     const sOut = next ? speedKmh(cur.originalGps, next.originalGps, next.timestamp - cur.timestamp) : null;
+    const dIn  = prev ? haversine(prev.originalGps, cur.originalGps) : null;
+    const dOut = next ? haversine(cur.originalGps, next.originalGps) : null;
     if (prev && next) {
-      cur.isOutlier = (sIn > T && sOut > T);
+      const dSkip = haversine(prev.originalGps, next.originalGps);
+      const speedSpike = sIn > T && sOut > T;
+      const distSpike = dIn > JUMP && dOut > JUMP && dSkip * 5 < Math.min(dIn, dOut);
+      cur.isOutlier = speedSpike || distSpike;
     } else if (!prev && next) {
-      // First point: outlier only if the jump to `next` is large AND `next` itself
-      // continues normally (so `next` is trustworthy and `cur` is the odd one out).
+      // First point: outlier if the jump to `next` is large AND `next` continues
+      // normally (so `next` is trustworthy and `cur` is the odd one out).
       const nn = list[i+2];
       const sNext = nn ? speedKmh(next.originalGps, nn.originalGps, nn.timestamp - next.timestamp) : 0;
-      cur.isOutlier = (sOut > T && sNext <= T);
+      const dNext = nn ? haversine(next.originalGps, nn.originalGps) : 0;
+      cur.isOutlier = (sOut > T && sNext <= T) || (dOut > JUMP && (!nn || dNext < JUMP));
     } else if (prev && !next) {
       // Last point: symmetric to the first-point rule.
       const pp = list[i-2];
       const sPrev = pp ? speedKmh(pp.originalGps, prev.originalGps, prev.timestamp - pp.timestamp) : 0;
-      cur.isOutlier = (sIn > T && sPrev <= T);
+      const dPrev = pp ? haversine(pp.originalGps, prev.originalGps) : 0;
+      cur.isOutlier = (sIn > T && sPrev <= T) || (dIn > JUMP && (!pp || dPrev < JUMP));
     }
   }
 
@@ -933,6 +972,8 @@ function createGoogle() {
     },
     panTo(c) { map.panTo({ lat: c.lat, lng: c.lng }); },
     atMaxZoom() { return map ? map.getZoom() >= 20 : false; },
+    getView() { return map ? { lat: map.getCenter().lat(), lng: map.getCenter().lng(), zoom: map.getZoom() } : null; },
+    applyView(v) { if (map && v) { map.setCenter({ lat: v.lat, lng: v.lng }); map.setZoom(Math.round(v.zoom)); } },
     reset() { map = null; projHelper = null; markers = []; paths = []; },
     setMapType(t) { if (map) map.setMapTypeId({ roadmap: 'roadmap', satellite: 'satellite', hybrid: 'hybrid' }[t] || 'roadmap'); },
     onContainerResize() { if (map) google.maps.event.trigger(map, 'resize'); },
@@ -978,6 +1019,12 @@ function createGoogle() {
       lines.forEach(([a, b]) => {
         const pl = new google.maps.Polyline({ path: [a, b], map, strokeColor: color, strokeOpacity: 0.7, strokeWeight: 1.5, zIndex: 5 });
         markers.push(pl);
+      });
+    },
+    drawFov(cones) {
+      cones.forEach(c => {
+        const poly = new google.maps.Polygon({ paths: c.map(p => ({ lat: p.lat, lng: p.lng })), map, clickable: false, strokeColor: '#2563eb', strokeOpacity: 0.7, strokeWeight: 1, fillColor: '#2563eb', fillOpacity: 0.18, zIndex: 2 });
+        markers.push(poly);
       });
     },
     drawPath(segments, color, opacity) {
@@ -1038,6 +1085,8 @@ function createNaver() {
     },
     panTo(c) { map.panTo(new naver.maps.LatLng(c.lat, c.lng)); },
     atMaxZoom() { if (!map) return false; const mx = map.getMaxZoom ? map.getMaxZoom() : 21; return map.getZoom() >= mx; },
+    getView() { return map ? { lat: map.getCenter().lat(), lng: map.getCenter().lng(), zoom: map.getZoom() } : null; },
+    applyView(v) { if (map && v) { map.setCenter(new naver.maps.LatLng(v.lat, v.lng)); map.setZoom(Math.round(v.zoom)); } },
     reset() { map = null; markers = []; paths = []; cadastralLayer = null; },
     setMapType(t) {
       if (!map) return;
@@ -1109,6 +1158,15 @@ function createNaver() {
         markers.push(pl);
       });
     },
+    drawFov(cones) {
+      cones.forEach(c => {
+        const poly = new naver.maps.Polygon({
+          map, paths: c.map(p => new naver.maps.LatLng(p.lat, p.lng)),
+          strokeColor: '#2563eb', strokeOpacity: 0.7, strokeWeight: 1, fillColor: '#2563eb', fillOpacity: 0.18,
+        });
+        markers.push(poly);
+      });
+    },
     drawPath(segments, color, opacity) {
       segments.forEach(seg => {
         const pl = new naver.maps.Polyline({
@@ -1153,6 +1211,9 @@ function createKakao() {
       const el = prepareContainer();
       map = new kakao.maps.Map(el, { center: new kakao.maps.LatLng(37.5665, 126.9780), level: 6 });
       kakao.maps.event.addListener(map, 'idle', () => { if (viewCb) viewCb(); });
+      // Recompute layout once the container has its real size, so projection/markers
+      // are placed correctly (otherwise thumbnails can be mispositioned/hidden).
+      setTimeout(() => { if (map) map.relayout(); }, 0);
     },
     fitTo(coords) {
       if (!coords.length) return;
@@ -1163,6 +1224,8 @@ function createKakao() {
     },
     panTo(c) { map.panTo(new kakao.maps.LatLng(c.lat, c.lng)); },
     atMaxZoom() { return map ? map.getLevel() <= 1 : false; },
+    getView() { if (!map) return null; const c = map.getCenter(); return { lat: c.getLat(), lng: c.getLng(), zoom: 21 - map.getLevel() }; },
+    applyView(v) { if (map && v) { map.setLevel(Math.max(1, Math.min(14, Math.round(21 - v.zoom)))); map.setCenter(new kakao.maps.LatLng(v.lat, v.lng)); } },
     reset() { map = null; markers = []; paths = []; },
     setMapType(t) {
       if (!map) return;
@@ -1179,13 +1242,18 @@ function createKakao() {
     clearPaths() { paths.forEach(p => p.setMap(null)); paths = []; },
     addThumb(photo, coord, size, onClick, selected) {
       const pin = photo.pin; if (!pin) return;
+      // Wrap in a fixed-size box so Kakao's xAnchor/yAnchor resolve correctly even
+      // before the image finishes loading (raw <img> mis-positions the overlay).
+      const box = document.createElement('div');
+      box.style.width = pin.w + 'px'; box.style.height = pin.h + 'px'; box.style.position = 'relative';
       const img = document.createElement('img');
       img.src = pin.url; img.width = pin.w; img.height = pin.h;
       img.className = 'photo-pin-img' + (selected ? ' selected' : '');
-      img.addEventListener('click', onClick);
+      box.appendChild(img);
+      box.addEventListener('click', onClick);
       const ov = new kakao.maps.CustomOverlay({
         position: new kakao.maps.LatLng(coord.lat, coord.lng),
-        content: img, xAnchor: pin.ax / pin.w, yAnchor: pin.ay / pin.h, zIndex: selected ? 1000 : (photo.isOutlier ? 50 : 10),
+        content: box, xAnchor: pin.ax / pin.w, yAnchor: pin.ay / pin.h, zIndex: selected ? 1000 : (photo.isOutlier ? 50 : 10),
       });
       ov.setMap(map);
       markers.push(ov);
@@ -1230,6 +1298,16 @@ function createKakao() {
         });
         pl.setMap(map);
         markers.push(pl);
+      });
+    },
+    drawFov(cones) {
+      cones.forEach(c => {
+        const poly = new kakao.maps.Polygon({
+          path: c.map(p => new kakao.maps.LatLng(p.lat, p.lng)),
+          strokeWeight: 1, strokeColor: '#2563eb', strokeOpacity: 0.7, fillColor: '#2563eb', fillOpacity: 0.18,
+        });
+        poly.setMap(map);
+        markers.push(poly);
       });
     },
     drawPath(segments, color, opacity) {
@@ -1321,6 +1399,8 @@ function createLeaflet() {
     },
     panTo(c) { map.panTo([c.lat, c.lng]); },
     atMaxZoom() { return map ? map.getZoom() >= map.getMaxZoom() : false; },
+    getView() { return map ? { lat: map.getCenter().lat, lng: map.getCenter().lng, zoom: map.getZoom() } : null; },
+    applyView(v) { if (map && v) map.setView([v.lat, v.lng], Math.round(v.zoom), { animate: false }); },
     clearMarkers() { if (markerLayer) markerLayer.clearLayers(); },
     clearPaths() { if (pathLayer) pathLayer.clearLayers(); },
     addThumb(photo, coord, size, onClick, selected) {
@@ -1367,6 +1447,11 @@ function createLeaflet() {
         L.polyline([[a.lat, a.lng], [b.lat, b.lng]], { color, weight: 1.5, opacity: 0.7, interactive: false }).addTo(markerLayer);
       });
     },
+    drawFov(cones) {
+      cones.forEach(c => {
+        L.polygon(c.map(p => [p.lat, p.lng]), { color: '#2563eb', weight: 1, opacity: 0.7, fillColor: '#2563eb', fillOpacity: 0.18, interactive: false }).addTo(markerLayer);
+      });
+    },
     drawPath(segments, color, opacity) {
       segments.forEach(seg => { L.polyline(seg.map(c => [c.lat, c.lng]), { color, opacity, weight: 2 }).addTo(pathLayer); });
     },
@@ -1403,8 +1488,12 @@ async function ensureMapReady(fit) {
     if (a.setMapType) a.setMapType(State.mapType);
     if (a.setCadastral) a.setCadastral(State.cadastral);
     updateCadastralButton();
+    // Preserve the previous map's center/zoom across a provider switch instead of
+    // re-fitting to all photos (which jumped to a country-wide view).
+    let appliedView = false;
+    if (State._pendingView && a.applyView) { a.applyView(State._pendingView); State._pendingView = null; appliedView = true; }
     renderAll();
-    if (State.geo.length) { hideOverlay(); if (fit) a.fitTo(dataCoords()); }
+    if (State.geo.length) { hideOverlay(); if (fit && !appliedView) a.fitTo(dataCoords()); }
   } catch (e) {
     if (e instanceof NoKeyError) {
       setOverlay(`${providerName(e.provider)} 지도 키가 필요합니다. ⚙️ 설정에서 API 키를 입력하세요.`);
@@ -1483,6 +1572,21 @@ function spreadLayout(n, size) {
   return res;
 }
 
+// Draw a field-of-view triangle (apex at the GPS point, spreading toward the
+// shooting direction) for each photo that has a direction.
+function drawFovCones(a, list) {
+  if (!a.drawFov) return;
+  const FOV = 50; // degrees — approximate angle of view
+  const cones = [];
+  for (const p of list) {
+    if (p.direction == null) continue;
+    const c = p.correctedGps;
+    const D = Math.max(15, 70 * metersPerPixel(a, c)); // ~70px long, zoom-adaptive
+    cones.push([c, destinationPoint(c.lat, c.lng, p.direction - FOV / 2, D), destinationPoint(c.lat, c.lng, p.direction + FOV / 2, D)]);
+  }
+  if (cones.length) a.drawFov(cones);
+}
+
 function renderMarkers() {
   const a = adapter();
   if (!a.ready) return;
@@ -1492,6 +1596,7 @@ function renderMarkers() {
   // Above PERF_CAP photos, fall back to dots to keep a very large set responsive.
   const tooMany = vg.length > PERF_CAP;
   const useThumbs = State.thumbnailsOn && !tooMany;
+  if (State.showFov) drawFovCones(a, vg);
 
   if (!useThumbs) {
     if (State.simplifiedMode === 'heat') {
@@ -1951,7 +2056,21 @@ function setupTimeSlider() {
   State.timeFrom = tmin; State.timeTo = tmax;
   $('timeFrom').value = 0; $('timeTo').value = 1000;
   bar.classList.remove('hidden'); bar.classList.add('flex');
+  renderTimeTicks(tmin, tmax);
   updateTimeLabels();
+}
+// Mark the days that have photos as dots on the slider track.
+function renderTimeTicks(tmin, tmax) {
+  const el = $('timeTicks'); if (!el) return;
+  const span = (tmax - tmin) || 1;
+  const days = new Set();
+  for (const p of State.geo) days.add(new Date(p.timestamp).toDateString());
+  const dayMs = new Set();
+  for (const p of State.geo) { const d = new Date(p.timestamp); d.setHours(0,0,0,0); dayMs.add(+d); }
+  el.innerHTML = [...dayMs].map(t => {
+    const pct = Math.max(0, Math.min(100, ((t - tmin) / span) * 100));
+    return `<span style="left:${pct}%" title="${new Date(t).toLocaleDateString()}"></span>`;
+  }).join('');
 }
 function onTimeSlider() {
   const a = +$('timeFrom').value, b = +$('timeTo').value;
@@ -2373,8 +2492,11 @@ function init() {
 
   $('providerSelect').addEventListener('change', async e => {
     const prev = State.provider;
+    const prevAdapter = Adapters[prev];
+    // Capture the current center/zoom so the new provider opens at the same place.
+    State._pendingView = (prevAdapter && prevAdapter.ready && prevAdapter.getView) ? prevAdapter.getView() : null;
     State.provider = e.target.value;
-    if (prev !== State.provider && Adapters[prev] && Adapters[prev].reset) Adapters[prev].reset();
+    if (prev !== State.provider && prevAdapter && prevAdapter.reset) prevAdapter.reset();
     await ensureMapReady(true);
   });
 
@@ -2385,6 +2507,13 @@ function init() {
   });
 
   $('cadastralBtn').addEventListener('click', toggleCadastral);
+
+  $('fovBtn').addEventListener('click', () => {
+    State.showFov = !State.showFov;
+    $('fovState').textContent = State.showFov ? 'ON' : 'OFF';
+    $('fovState').className = 'font-semibold ' + (State.showFov ? 'text-blue-600' : 'text-slate-400');
+    renderMarkers();
+  });
 
   $('exportSelect').addEventListener('change', e => {
     const fmt = e.target.value;
@@ -2454,7 +2583,8 @@ function init() {
   $('settingsBtn').addEventListener('click', openSettings);
   $('settingsClose').addEventListener('click', closeSettings);
   $('settingsSave').addEventListener('click', saveFromSettings);
-  $('settingsModal').addEventListener('click', e => { if (e.target.id === 'settingsModal') closeSettings(); });
+  // Settings closes only via the × or Save button — no backdrop-click close, which
+  // was dismissing the dialog when users tapped near a field while entering keys.
 
   // Detail controls
   $('detailClose').addEventListener('click', closeDetail);
@@ -2463,6 +2593,9 @@ function init() {
 
   // Keyboard
   document.addEventListener('keydown', e => {
+    // Don't hijack typing in form fields (settings keys, number inputs, etc.).
+    const t = e.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
     if (State.detailIndex < 0) return;
     if (e.key === 'ArrowLeft') navDetail(-1);
     else if (e.key === 'ArrowRight') navDetail(1);
@@ -2548,28 +2681,34 @@ function openSettings() {
 function closeSettings() { const m = $('settingsModal'); m.classList.add('hidden'); m.classList.remove('flex'); }
 
 async function saveFromSettings() {
-  const prevThumb = Settings.thumbSize, prevSpeed = Settings.outlierSpeed;
-  Settings.keys.google = $('keyGoogle').value.trim();
-  Settings.keys.naver = $('keyNaver').value.trim();
-  Settings.keys.kakao = $('keyKakao').value.trim();
-  Settings.outlierSpeed = Math.max(1, +$('optSpeed').value || 200);
-  Settings.gapMinutes = Math.max(1, +$('optGap').value || 60);
-  Settings.thumbSize = Math.min(120, Math.max(24, +$('optThumb').value || 56));
-  saveSettings();
-  closeSettings();
+  try {
+    const prevThumb = Settings.thumbSize, prevSpeed = Settings.outlierSpeed;
+    Settings.keys.google = $('keyGoogle').value.trim();
+    Settings.keys.naver = $('keyNaver').value.trim();
+    Settings.keys.kakao = $('keyKakao').value.trim();
+    Settings.outlierSpeed = Math.max(1, +$('optSpeed').value || 200);
+    Settings.gapMinutes = Math.max(1, +$('optGap').value || 60);
+    Settings.thumbSize = Math.min(120, Math.max(24, +$('optThumb').value || 56));
+    saveSettings();
+    closeSettings();
 
-  // Re-process if outlier threshold changed; regenerate thumbnails if size/threshold changed.
-  if (State.geo.length) {
-    const speedChanged = prevSpeed !== Settings.outlierSpeed;
-    const thumbChanged = prevThumb !== Settings.thumbSize;
-    if (speedChanged) { processOutliers(State.geo); computeClusters(); populateClusterNav(); }
-    if (speedChanged || thumbChanged) {
-      showLoading(true, '썸네일 재생성 중…');
-      for (const p of State.geo) p.pin = await makePin(await displayBlob(p), Settings.thumbSize, p.isOutlier, p.direction);
-      showLoading(false);
+    // Re-process if outlier threshold changed; regenerate thumbnails if size/threshold changed.
+    if (State.geo.length) {
+      const speedChanged = prevSpeed !== Settings.outlierSpeed;
+      const thumbChanged = prevThumb !== Settings.thumbSize;
+      if (speedChanged) { processOutliers(State.geo); computeClusters(); populateClusterNav(); }
+      if (speedChanged || thumbChanged) {
+        showLoading(true, '썸네일 재생성 중…');
+        for (const p of State.geo) p.pin = await makePin(await displayBlob(p), Settings.thumbSize, p.isOutlier, p.direction);
+        showLoading(false);
+      }
     }
+    await ensureMapReady(false);
+  } catch (e) {
+    console.error('설정 적용 중 오류', e);
+    showLoading(false);
+    closeSettings();
   }
-  await ensureMapReady(false);
 }
 
 document.addEventListener('DOMContentLoaded', init);
