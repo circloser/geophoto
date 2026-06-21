@@ -932,6 +932,7 @@ function createGoogle() {
       if (coords.length === 1) map.setZoom(15);
     },
     panTo(c) { map.panTo({ lat: c.lat, lng: c.lng }); },
+    atMaxZoom() { return map ? map.getZoom() >= 20 : false; },
     reset() { map = null; projHelper = null; markers = []; paths = []; },
     setMapType(t) { if (map) map.setMapTypeId({ roadmap: 'roadmap', satellite: 'satellite', hybrid: 'hybrid' }[t] || 'roadmap'); },
     onContainerResize() { if (map) google.maps.event.trigger(map, 'resize'); },
@@ -1036,6 +1037,7 @@ function createNaver() {
       map.fitBounds(b);
     },
     panTo(c) { map.panTo(new naver.maps.LatLng(c.lat, c.lng)); },
+    atMaxZoom() { if (!map) return false; const mx = map.getMaxZoom ? map.getMaxZoom() : 21; return map.getZoom() >= mx; },
     reset() { map = null; markers = []; paths = []; cadastralLayer = null; },
     setMapType(t) {
       if (!map) return;
@@ -1160,6 +1162,7 @@ function createKakao() {
       map.setBounds(b);
     },
     panTo(c) { map.panTo(new kakao.maps.LatLng(c.lat, c.lng)); },
+    atMaxZoom() { return map ? map.getLevel() <= 1 : false; },
     reset() { map = null; markers = []; paths = []; },
     setMapType(t) {
       if (!map) return;
@@ -1317,6 +1320,7 @@ function createLeaflet() {
       map.fitBounds(coords.map(c => [c.lat, c.lng]), { padding: [40, 40] });
     },
     panTo(c) { map.panTo([c.lat, c.lng]); },
+    atMaxZoom() { return map ? map.getZoom() >= map.getMaxZoom() : false; },
     clearMarkers() { if (markerLayer) markerLayer.clearLayers(); },
     clearPaths() { if (pathLayer) pathLayer.clearLayers(); },
     addThumb(photo, coord, size, onClick, selected) {
@@ -1460,6 +1464,25 @@ function representativePhoto(group) {
   return group.reduce((best, it) => it.p.timestamp < best.timestamp ? it.p : best, group[0].p);
 }
 
+// Concentric-ring pixel offsets used to spread a same-location group apart at
+// max zoom (last resort, so each photo is individually visible/clickable).
+function spreadLayout(n, size) {
+  const res = [];
+  const step = size * 1.05, firstR = size * 0.8;
+  let placed = 0, ring = 1;
+  while (placed < n) {
+    const r = firstR + (ring - 1) * step;
+    const cap = Math.max(1, Math.floor((2 * Math.PI * r) / step));
+    const cnt = Math.min(cap, n - placed);
+    for (let i = 0; i < cnt; i++) {
+      const ang = (2 * Math.PI * i) / cnt - Math.PI / 2;
+      res.push({ x: Math.cos(ang) * r, y: Math.sin(ang) * r });
+    }
+    placed += cnt; ring++;
+  }
+  return res;
+}
+
 function renderMarkers() {
   const a = adapter();
   if (!a.ready) return;
@@ -1499,10 +1522,26 @@ function renderMarkers() {
   // Threshold is wider than the thumbnail diameter so a dense blob collapses to a
   // single pin; zooming in spreads the tips apart and they separate automatically.
   const groups = groupByPixelProximity(items, size * 1.35);
+  // At the map's deepest zoom, photos sharing (nearly) the same coordinate can no
+  // longer be separated by zooming, so spread that group apart so each is visible.
+  const atMax = a.atMaxZoom ? a.atMaxZoom() : false;
+  const connectors = [];
   for (const grp of groups) {
     if (grp.length === 1) {
       const it = grp[0];
       a.addThumb(it.p, it.p.correctedGps, size, () => onPinClick(it.p), isPicked(it.p));
+      continue;
+    }
+    if (atMax && a.unproject) {
+      // Spiderfy: fan the group out around its screen centroid.
+      const ax = grp.reduce((s, it) => s + it.px.x, 0) / grp.length;
+      const ay = grp.reduce((s, it) => s + it.px.y, 0) / grp.length;
+      const offs = spreadLayout(grp.length, size);
+      grp.forEach((it, i) => {
+        const disp = a.unproject({ x: ax + offs[i].x, y: ay + offs[i].y }) || it.p.correctedGps;
+        if (a.addConnectors) connectors.push([it.p.correctedGps, disp]);
+        a.addThumb(it.p, disp, size, () => onPinClick(it.p), isPicked(it.p));
+      });
       continue;
     }
     const rep = representativePhoto(grp);
@@ -1513,6 +1552,7 @@ function renderMarkers() {
     a.addThumb(rep, center, size, () => onPinClick(rep), repSelected);
     if (a.addBadge) a.addBadge(center, '+' + grp.length);
   }
+  if (connectors.length && a.addConnectors) a.addConnectors(connectors, '#94a3b8');
   updateStatus(undefined, { tooMany, useThumbs });
 }
 
