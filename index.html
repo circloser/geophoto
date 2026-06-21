@@ -1495,7 +1495,10 @@ function renderMarkers() {
     return;
   }
 
-  const groups = groupByPixelProximity(items, size * 0.7);
+  // Merge thumbnails whose on-screen circles touch/overlap into one representative.
+  // Threshold is wider than the thumbnail diameter so a dense blob collapses to a
+  // single pin; zooming in spreads the tips apart and they separate automatically.
+  const groups = groupByPixelProximity(items, size * 1.35);
   for (const grp of groups) {
     if (grp.length === 1) {
       const it = grp[0];
