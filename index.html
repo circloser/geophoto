@@ -662,43 +662,45 @@ function metersPerPixel(a, coord) {
   return px > 0 ? haversine(coord, east) / px : 30;
 }
 
+function median(arr) {
+  if (!arr.length) return 0;
+  const s = arr.slice().sort((a, b) => a - b);
+  const m = Math.floor(s.length / 2);
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+}
+
 /* ---------- Outlier detection + correction ---------- */
 function processOutliers(list) {
   const T = Settings.outlierSpeed;
   list.forEach(p => { p.isOutlier = false; p.correctedGps = { ...p.originalGps }; });
+  const n = list.length;
 
-  // "There-and-back" distance jump: far from BOTH neighbours while the neighbours
-  // stay close to each other. This ratio test is time-independent (catches a far
-  // GPS-error photo even with a large timestamp gap, where the speed test misses
-  // it) and median-free (robust even when the spike dominates a small set). The
-  // JUMP floor avoids flagging ordinary GPS jitter; collinear travel isn't flagged
-  // because there the neighbours are also far apart (dSkip stays large).
-  const JUMP = 1000; // metres
+  if (n >= 3) {
+    // Robust detection: compare each photo to the MEDIAN position of its temporal
+    // neighbourhood (±W photos). A GPS spike sits far from where its neighbours say
+    // it should be. Using the median (not a single neighbour) makes this work for
+    // isolated spikes, several consecutive spikes, and endpoints alike — and it's
+    // time-independent, so a 2–3 s spike and a long-gap jump are both caught.
+    const W = 4;
+    for (let i = 0; i < n; i++) {
+      const nbr = [];
+      for (let j = Math.max(0, i - W); j <= Math.min(n - 1, i + W); j++) {
+        if (j !== i) nbr.push(list[j].originalGps);
+      }
+      const m = { lat: median(nbr.map(p => p.lat)), lng: median(nbr.map(p => p.lng)) };
+      const dev = haversine(list[i].originalGps, m);
+      // How spread is this neighbourhood? A spike sits in a TIGHT neighbourhood yet
+      // far from it; the end of a moving track sits in a WIDE one (so its offset
+      // from the median is normal). A threshold relative to that spread avoids
+      // false positives at track ends while still catching spikes.
+      const spread = median(nbr.map(p => haversine(p, m)));
+      const thresh = Math.max(120, spread * 3);
 
-  for (let i = 0; i < list.length; i++) {
-    const prev = list[i-1], cur = list[i], next = list[i+1];
-    const sIn  = prev ? speedKmh(prev.originalGps, cur.originalGps, cur.timestamp - prev.timestamp) : null;
-    const sOut = next ? speedKmh(cur.originalGps, next.originalGps, next.timestamp - cur.timestamp) : null;
-    const dIn  = prev ? haversine(prev.originalGps, cur.originalGps) : null;
-    const dOut = next ? haversine(cur.originalGps, next.originalGps) : null;
-    if (prev && next) {
-      const dSkip = haversine(prev.originalGps, next.originalGps);
-      const speedSpike = sIn > T && sOut > T;
-      const distSpike = dIn > JUMP && dOut > JUMP && dSkip * 5 < Math.min(dIn, dOut);
-      cur.isOutlier = speedSpike || distSpike;
-    } else if (!prev && next) {
-      // First point: outlier if the jump to `next` is large AND `next` continues
-      // normally (so `next` is trustworthy and `cur` is the odd one out).
-      const nn = list[i+2];
-      const sNext = nn ? speedKmh(next.originalGps, nn.originalGps, nn.timestamp - next.timestamp) : 0;
-      const dNext = nn ? haversine(next.originalGps, nn.originalGps) : 0;
-      cur.isOutlier = (sOut > T && sNext <= T) || (dOut > JUMP && (!nn || dNext < JUMP));
-    } else if (prev && !next) {
-      // Last point: symmetric to the first-point rule.
-      const pp = list[i-2];
-      const sPrev = pp ? speedKmh(pp.originalGps, prev.originalGps, prev.timestamp - pp.timestamp) : 0;
-      const dPrev = pp ? haversine(pp.originalGps, prev.originalGps) : 0;
-      cur.isOutlier = (sIn > T && sPrev <= T) || (dIn > JUMP && (!pp || dPrev < JUMP));
+      const prev = list[i-1], next = list[i+1];
+      const sIn  = prev ? speedKmh(prev.originalGps, list[i].originalGps, list[i].timestamp - prev.timestamp) : 0;
+      const sOut = next ? speedKmh(list[i].originalGps, next.originalGps, next.timestamp - list[i].timestamp) : 0;
+      const speedSpike = prev && next && sIn > T && sOut > T;
+      list[i].isOutlier = dev > thresh || speedSpike;
     }
   }
 
