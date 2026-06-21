@@ -330,9 +330,9 @@
         <p class="text-[11px] text-slate-400 mt-0.5">Maps JavaScript API 사용 설정 필요</p>
       </div>
       <div>
-        <label class="block font-medium text-slate-600 mb-1">Naver Maps Client ID</label>
-        <input id="keyNaver" type="text" placeholder="ncpClientId" class="w-full border border-slate-300 rounded-md px-2 py-1.5" />
-        <p class="text-[11px] text-slate-400 mt-0.5">네이버 클라우드 플랫폼 Maps (Web Dynamic Map)</p>
+        <label class="block font-medium text-slate-600 mb-1">Naver Maps Key ID (ncpKeyId)</label>
+        <input id="keyNaver" type="text" placeholder="ncpKeyId" class="w-full border border-slate-300 rounded-md px-2 py-1.5" />
+        <p class="text-[11px] text-slate-400 mt-0.5">NCP 콘솔 Maps의 신규 Key ID. 콘솔에 서비스 URL(도메인) 등록 필요</p>
       </div>
       <div>
         <label class="block font-medium text-slate-600 mb-1">Kakao Maps JavaScript Key</label>
@@ -991,9 +991,12 @@ function createNaver() {
       const key = Settings.keys.naver;
       if (!key) throw new NoKeyError('naver');
       if (!loaded) {
-        await loadScript(`https://oapi.map.naver.com/openapi/v3/maps.js?ncpClientId=${encodeURIComponent(key)}`);
+        // New NCP console (2024+) issues keys that authenticate via `ncpKeyId`.
+        // The old `ncpClientId` param only works for legacy client IDs.
+        await loadScript(`https://oapi.map.naver.com/openapi/v3/maps.js?ncpKeyId=${encodeURIComponent(key)}`);
         loaded = true;
       }
+      if (!(window.naver && naver.maps)) throw new Error('Naver Maps SDK 로드 실패 — 키(ncpKeyId)와 등록 도메인을 확인하세요.');
       const el = prepareContainer();
       map = new naver.maps.Map(el, { center: new naver.maps.LatLng(37.5665, 126.9780), zoom: 12 });
       naver.maps.Event.addListener(map, 'idle', () => { if (viewCb) viewCb(); });
@@ -2340,6 +2343,13 @@ function init() {
 
   // Reverse geocoding (place names)
   $('geocodeBtn').addEventListener('click', fillPlaceNames);
+
+  // Naver Maps auth-failure callback (fires when ncpKeyId / domain is rejected).
+  window.navermap_authFailure = function () {
+    if (State.provider === 'naver') {
+      setOverlay('Naver 지도 인증 실패 — ⚙️ 설정의 Key ID(ncpKeyId)와 NCP 콘솔에 등록한 서비스 URL(도메인)을 확인하세요.');
+    }
+  };
 
   // PWA: network status + service worker
   updateNetBadge();
