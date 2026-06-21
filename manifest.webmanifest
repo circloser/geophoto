@@ -1,0 +1,20 @@
+{
+  "name": "GeoPhoto Map Navigator",
+  "short_name": "GeoPhoto",
+  "description": "GPS 사진 메타데이터 지도 시각화 도구",
+  "lang": "ko",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f1f5f9",
+  "theme_color": "#2563eb",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%232563eb'/%3E%3Cpath d='M256 96c-70 0-127 57-127 127 0 95 127 193 127 193s127-98 127-193c0-70-57-127-127-127z' fill='%23fff'/%3E%3Ccircle cx='256' cy='223' r='58' fill='%232563eb'/%3E%3C/svg%3E",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

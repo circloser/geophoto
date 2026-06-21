@@ -1,0 +1,4 @@
+# Local tooling / agent state — not part of the deployed site
+.omc/
+.agents/
+.claude/

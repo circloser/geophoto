@@ -1,0 +1,2497 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover" />
+<title>GeoPhoto Map Navigator</title>
+<link rel="manifest" href="manifest.webmanifest" />
+<meta name="theme-color" content="#2563eb" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="apple-mobile-web-app-title" content="GeoPhoto" />
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/exifr/dist/full.umd.js"></script>
+<style>
+  html, body { height: 100%; margin: 0; }
+  #app { height: 100vh; display: flex; flex-direction: column; }
+  /* z-index:0 makes #map an isolated stacking context so the map library's internal
+     panes/controls (Leaflet uses up to ~1000) cannot paint over the toolbar,
+     overlays, or the settings modal. */
+  #map { width: 100%; height: 100%; background: #e5e7eb; position: relative; z-index: 0; }
+
+  /* Custom HTML markers (used by Naver & Kakao adapters) */
+  .thumb-marker {
+    border-radius: 50%;
+    background-size: cover;
+    background-position: center;
+    box-shadow: 0 1px 5px rgba(0,0,0,.45);
+    cursor: pointer;
+    transform-origin: center;
+    transition: transform .1s ease;
+    will-change: transform;
+  }
+  .thumb-marker:hover { transform: scale(1.18); z-index: 20; }
+  .dot-marker {
+    width: 13px; height: 13px; border-radius: 50%;
+    background: #2563eb; border: 1.5px solid #fff;
+    box-shadow: 0 0 2px rgba(0,0,0,.4); cursor: pointer;
+  }
+  .dot-marker.outlier { background: #f59e0b; }
+  .heat-marker {
+    width: 46px; height: 46px; border-radius: 50%;
+    background: radial-gradient(circle, rgba(239,68,68,.55) 0%, rgba(239,68,68,0) 70%);
+    pointer-events: none; mix-blend-mode: multiply;
+  }
+
+  /* Photo pin (circular photo + downward pointer baked as PNG) */
+  .photo-pin-icon { background: transparent !important; border: none !important; }
+  .photo-pin-icon img, img.photo-pin-img {
+    display: block; cursor: pointer;
+    transform-origin: bottom center; transition: transform .1s ease;
+    filter: drop-shadow(0 2px 3px rgba(0,0,0,.4));
+  }
+  .photo-pin-icon img:hover, img.photo-pin-img:hover { transform: scale(1.12); }
+  /* Selected photo: enlarge its pin and add a blue glow */
+  .photo-pin-icon.selected { z-index: 1000 !important; }
+  .photo-pin-icon.selected img, img.photo-pin-img.selected {
+    transform: scale(1.3);
+    filter: drop-shadow(0 2px 3px rgba(0,0,0,.45)) drop-shadow(0 0 7px #2563eb) drop-shadow(0 0 2px #2563eb);
+  }
+  /* Spiderfy connector lines are drawn by the map library; nothing needed here. */
+  .leaflet-container { font: inherit; background: #aadaff; }
+
+  /* Resize splitter between map and detail pane */
+  #splitter {
+    flex: 0 0 auto; width: 7px; cursor: col-resize;
+    background: #e2e8f0; position: relative; z-index: 5;
+  }
+  #splitter:hover, #splitter.dragging { background: #94a3b8; }
+  #splitter::before {
+    content: ''; position: absolute; top: 50%; left: 50%;
+    width: 2px; height: 28px; transform: translate(-50%, -50%);
+    background: #94a3b8; border-radius: 2px;
+  }
+  #splitter:hover::before, #splitter.dragging::before { background: #fff; }
+
+  /* Detail pane image transform */
+  #detailViewport { overflow: hidden; position: relative; background: #111827; }
+  #detailImg {
+    position: absolute; top: 50%; left: 50%;
+    transform-origin: center center;
+    max-width: none; user-select: none; -webkit-user-drag: none;
+    will-change: transform;
+  }
+  #detailViewport.grabbing { cursor: grabbing; }
+  #detailViewport.grab { cursor: grab; }
+
+  .spinner {
+    width: 38px; height: 38px; border: 4px solid #cbd5e1;
+    border-top-color: #2563eb; border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .badge { font-size: 11px; padding: 1px 7px; border-radius: 9999px; }
+
+  /* Dual-handle time range slider: two native range inputs share one visual track. */
+  .time-range {
+    --from: 0%;
+    --to: 100%;
+    position: relative;
+    height: 30px;
+  }
+  .time-range-track,
+  .time-range-fill {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 50%;
+    height: 6px;
+    border-radius: 9999px;
+    transform: translateY(-50%);
+  }
+  .time-range-track { background: #e2e8f0; }
+  .time-range-fill {
+    left: var(--from);
+    right: calc(100% - var(--to));
+    background: #2563eb;
+  }
+  .time-range-input {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 30px;
+    margin: 0;
+    appearance: none;
+    -webkit-appearance: none;
+    background: transparent;
+    pointer-events: none;
+  }
+  .time-range-input::-webkit-slider-runnable-track {
+    height: 30px;
+    background: transparent;
+    border: 0;
+  }
+  .time-range-input::-moz-range-track {
+    height: 30px;
+    background: transparent;
+    border: 0;
+  }
+  .time-range-input::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 17px;
+    height: 17px;
+    margin-top: 6.5px;
+    border-radius: 50%;
+    border: 2px solid #2563eb;
+    background: #fff;
+    box-shadow: 0 1px 4px rgba(15, 23, 42, .28);
+    cursor: ew-resize;
+    pointer-events: auto;
+  }
+  .time-range-input::-moz-range-thumb {
+    width: 17px;
+    height: 17px;
+    border-radius: 50%;
+    border: 2px solid #2563eb;
+    background: #fff;
+    box-shadow: 0 1px 4px rgba(15, 23, 42, .28);
+    cursor: ew-resize;
+    pointer-events: auto;
+  }
+  .time-range-input-from { z-index: 3; }
+  .time-range-input-to { z-index: 4; }
+</style>
+</head>
+<body class="bg-slate-100 text-slate-800">
+<div id="app">
+
+  <!-- ===== Toolbar ===== -->
+  <header class="flex items-center gap-2 flex-wrap px-3 py-2 bg-white border-b border-slate-200 shadow-sm z-10">
+    <div class="flex items-center gap-2 mr-2">
+      <span class="text-lg">🗺️</span>
+      <span class="font-bold text-slate-700 hidden sm:inline">GeoPhoto Map Navigator</span>
+    </div>
+
+    <label class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-md cursor-pointer">
+      📁 <span>폴더 선택</span>
+      <input id="folderInput" type="file" accept="image/*" multiple webkitdirectory directory class="hidden" />
+    </label>
+    <label class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-700 text-sm rounded-md cursor-pointer" title="개별 파일 선택 (폴더 대신)">
+      🖼️ <span class="hidden md:inline">파일</span>
+      <input id="filesInput" type="file" accept="image/*" multiple class="hidden" />
+    </label>
+
+    <button id="trackBtn" class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-700 text-sm rounded-md" title="GPX 트랙으로 GPS 없는 사진에 좌표 부여">🛰 <span class="hidden md:inline">트랙</span></button>
+
+    <div class="h-6 w-px bg-slate-200 mx-1"></div>
+
+    <select id="providerSelect" class="text-sm border border-slate-300 rounded-md px-2 py-1.5 bg-white">
+      <option value="osm">OpenStreetMap (키 불필요)</option>
+      <option value="google">Google Maps</option>
+      <option value="naver">Naver Maps</option>
+      <option value="kakao">Kakao Maps</option>
+    </select>
+
+    <select id="mapTypeSelect" class="text-sm border border-slate-300 rounded-md px-2 py-1.5 bg-white" title="지도 종류">
+      <option value="roadmap">일반</option>
+      <option value="satellite">위성</option>
+      <option value="hybrid">하이브리드</option>
+    </select>
+
+    <button id="cadastralBtn" class="px-3 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed" title="지적편집도 (네이버/카카오 전용)">지적도: <span id="cadastralState" class="font-semibold text-slate-400">OFF</span></button>
+
+    <button id="thumbToggle" class="px-3 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50">
+      썸네일: <span id="thumbState" class="font-semibold text-blue-600">ON</span>
+    </button>
+
+    <select id="modeSelect" class="text-sm border border-slate-300 rounded-md px-2 py-1.5 bg-white" title="썸네일 OFF / 밀집 시 표시 방식">
+      <option value="dot">점 (Dot)</option>
+      <option value="heat">점구름 (Heatmap)</option>
+    </select>
+
+    <select id="pathSelect" class="text-sm border border-slate-300 rounded-md px-2 py-1.5 bg-white" title="이동 경로 선">
+      <option value="corrected">경로: 보정</option>
+      <option value="original">경로: 원본</option>
+      <option value="off">경로: 끄기</option>
+    </select>
+
+    <span id="clusterNav" class="hidden items-center gap-1">
+      <div class="h-6 w-px bg-slate-200 mx-1"></div>
+      <button id="fitAllBtn" class="px-3 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50" title="모든 사진이 보이도록 맞춤">⊡ 전체 보기</button>
+      <button id="clusterPrev" class="px-2 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50" title="이전 군집">◀</button>
+      <select id="clusterSelect" class="text-sm border border-slate-300 rounded-md px-2 py-1.5 bg-white" title="군집으로 이동"></select>
+      <button id="clusterNext" class="px-2 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50" title="다음 군집">▶</button>
+    </span>
+
+    <button id="geocodeBtn" class="px-3 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50" title="보이는 사진의 좌표로 지명 자동 채우기 (OpenStreetMap Nominatim)">🏷 지명 채우기</button>
+
+    <select id="exportSelect" class="text-sm border border-slate-300 rounded-md px-2 py-1.5 bg-white" title="조사 데이터 내보내기">
+      <option value="">⬇ 내보내기</option>
+      <option value="geojson">GeoJSON (.geojson)</option>
+      <option value="kml">KML (.kml)</option>
+      <option value="csv">CSV (.csv)</option>
+      <option value="xmp">XMP 사이드카 (.zip)</option>
+      <option value="exifjpeg">EXIF 기록 JPEG (.zip)</option>
+    </select>
+
+    <button id="compareBtn" class="px-3 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50" title="두 사진을 좌우로 비교">⚖ 비교: <span id="compareState" class="font-semibold text-slate-400">OFF</span></button>
+
+    <button id="settingsBtn" class="px-3 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50">⚙️ 설정</button>
+
+    <span id="netBadge" class="ml-auto inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-emerald-100 text-emerald-700" title="네트워크 상태">● 온라인</span>
+    <div id="status" class="text-xs text-slate-500 leading-tight text-right"></div>
+  </header>
+
+  <!-- ===== Time filter bar (shown after photos load) ===== -->
+  <div id="timeBar" class="hidden items-center gap-2 px-3 py-1.5 bg-white border-b border-slate-200 text-xs text-slate-600">
+    <span class="font-medium whitespace-nowrap">🕑 시간 필터</span>
+    <span id="timeFromLabel" class="font-mono whitespace-nowrap text-slate-500"></span>
+    <div id="timeRange" class="time-range flex-1 min-w-[180px] max-w-xl">
+      <div class="time-range-track"></div>
+      <div class="time-range-fill"></div>
+      <input id="timeFrom" type="range" min="0" max="1000" value="0" class="time-range-input time-range-input-from" aria-label="시간 필터 시작" />
+      <input id="timeTo" type="range" min="0" max="1000" value="1000" class="time-range-input time-range-input-to" aria-label="시간 필터 종료" />
+    </div>
+    <span id="timeToLabel" class="font-mono whitespace-nowrap text-slate-500"></span>
+    <button id="timeReset" class="px-2 py-1 rounded border border-slate-300 hover:bg-slate-50 whitespace-nowrap">초기화</button>
+    <span id="timeCount" class="text-slate-400 whitespace-nowrap"></span>
+  </div>
+
+  <!-- ===== Main split ===== -->
+  <div class="flex-1 flex min-h-0">
+    <!-- Map -->
+    <div class="relative flex-1 min-w-0">
+      <div id="map"></div>
+
+      <!-- Empty / hint overlay -->
+      <div id="overlay" class="absolute inset-0 flex items-center justify-center pointer-events-none">
+        <div id="overlayBox" class="pointer-events-auto bg-white/95 backdrop-blur rounded-xl shadow-lg px-8 py-6 max-w-md text-center">
+          <div class="text-4xl mb-3">📍</div>
+          <h2 class="text-lg font-bold text-slate-700 mb-1">GeoPhoto Map Navigator</h2>
+          <p id="overlayMsg" class="text-sm text-slate-500">사진 폴더를 선택하면 GPS 위치가 지도에 표시됩니다. (기본 지도는 OpenStreetMap — API 키 불필요)</p>
+        </div>
+      </div>
+
+      <!-- Loading overlay -->
+      <div id="loading" class="absolute inset-0 hidden items-center justify-center bg-white/70 backdrop-blur-sm z-20">
+        <div class="flex flex-col items-center gap-3">
+          <div class="spinner"></div>
+          <div id="loadingText" class="text-sm font-medium text-slate-600">처리 중…</div>
+        </div>
+      </div>
+
+      <!-- Legend -->
+      <div class="absolute bottom-3 left-3 bg-white/90 rounded-lg shadow px-3 py-2 text-xs text-slate-600 space-y-1">
+        <div class="flex items-center gap-2"><span class="inline-block w-3 h-3 rounded-full bg-blue-600"></span> 정상 위치</div>
+        <div class="flex items-center gap-2"><span class="inline-block w-3 h-3 rounded-full bg-amber-500"></span> 보정된 이상치</div>
+      </div>
+    </div>
+
+    <!-- Resize splitter (between map and detail pane) -->
+    <div id="splitter" class="hidden" title="드래그하여 크기 조절"></div>
+
+    <!-- Detail pane -->
+    <aside id="detailPane" class="hidden flex-col bg-white border-l border-slate-200 shadow-inner" style="width: 420px;">
+      <div class="flex items-center justify-between px-3 py-2 border-b border-slate-200">
+        <span id="detailTitle" class="text-sm font-semibold truncate">사진</span>
+        <button id="detailClose" class="text-slate-400 hover:text-slate-700 text-xl leading-none px-1">×</button>
+      </div>
+      <div id="detailViewport" class="flex-1 grab">
+        <img id="detailImg" alt="" draggable="false" />
+      </div>
+      <div class="flex items-center justify-center gap-1.5 px-2 py-2 border-t border-slate-200 bg-slate-50">
+        <button data-act="prev" class="dctl">⟨</button>
+        <button data-act="zoomout" class="dctl">－</button>
+        <button data-act="reset" class="dctl">⤢</button>
+        <button data-act="zoomin" class="dctl">＋</button>
+        <button data-act="full" class="dctl">⛶ 전체화면</button>
+        <button data-act="next" class="dctl">⟩</button>
+      </div>
+      <div id="detailMeta" class="px-3 py-2 text-xs text-slate-600 border-t border-slate-200 space-y-0.5 bg-white"></div>
+    </aside>
+  </div>
+</div>
+
+<!-- ===== Settings modal ===== -->
+<div id="settingsModal" class="hidden fixed inset-0 bg-black/40 items-center justify-center p-4" style="z-index: 10000;">
+  <div class="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-auto">
+    <div class="flex items-center justify-between px-5 py-3 border-b border-slate-200">
+      <h3 class="font-bold text-slate-700">⚙️ 설정</h3>
+      <button id="settingsClose" class="text-slate-400 hover:text-slate-700 text-xl leading-none">×</button>
+    </div>
+    <div class="p-5 space-y-4 text-sm">
+      <p class="text-xs text-slate-500 bg-slate-50 rounded-md p-2 leading-relaxed">
+        지도 API 키는 이 브라우저(localStorage)에만 저장되며 서버로 전송되지 않습니다.
+        선택한 지도 제공자의 키가 있어야 지도가 표시됩니다.
+      </p>
+      <div>
+        <label class="block font-medium text-slate-600 mb-1">Google Maps API Key</label>
+        <input id="keyGoogle" type="text" placeholder="AIza..." class="w-full border border-slate-300 rounded-md px-2 py-1.5" />
+        <p class="text-[11px] text-slate-400 mt-0.5">Maps JavaScript API 사용 설정 필요</p>
+      </div>
+      <div>
+        <label class="block font-medium text-slate-600 mb-1">Naver Maps Client ID</label>
+        <input id="keyNaver" type="text" placeholder="ncpClientId" class="w-full border border-slate-300 rounded-md px-2 py-1.5" />
+        <p class="text-[11px] text-slate-400 mt-0.5">네이버 클라우드 플랫폼 Maps (Web Dynamic Map)</p>
+      </div>
+      <div>
+        <label class="block font-medium text-slate-600 mb-1">Kakao Maps JavaScript Key</label>
+        <input id="keyKakao" type="text" placeholder="JavaScript 키" class="w-full border border-slate-300 rounded-md px-2 py-1.5" />
+        <p class="text-[11px] text-slate-400 mt-0.5">카카오 개발자 > 앱 > JavaScript 키 (도메인 등록 필요)</p>
+      </div>
+      <hr class="border-slate-200" />
+      <div class="grid grid-cols-3 gap-3">
+        <div>
+          <label class="block font-medium text-slate-600 mb-1">이상치 속도(km/h)</label>
+          <input id="optSpeed" type="number" min="1" class="w-full border border-slate-300 rounded-md px-2 py-1.5" />
+        </div>
+        <div>
+          <label class="block font-medium text-slate-600 mb-1">경로 끊김(분)</label>
+          <input id="optGap" type="number" min="1" class="w-full border border-slate-300 rounded-md px-2 py-1.5" />
+        </div>
+        <div>
+          <label class="block font-medium text-slate-600 mb-1">썸네일 크기(px)</label>
+          <input id="optThumb" type="number" min="24" max="120" class="w-full border border-slate-300 rounded-md px-2 py-1.5" />
+        </div>
+      </div>
+      <div class="flex justify-end gap-2 pt-2">
+        <button id="settingsSave" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium">저장 &amp; 적용</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== GPX track geotagging modal ===== -->
+<input id="gpxInput" type="file" accept=".gpx,application/gpx+xml,text/xml" class="hidden" />
+<div id="trackModal" class="hidden fixed inset-0 bg-black/40 items-center justify-center p-4" style="z-index: 10000;">
+  <div class="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-auto">
+    <div class="flex items-center justify-between px-5 py-3 border-b border-slate-200">
+      <h3 class="font-bold text-slate-700">🛰 GPX 트랙 지오태깅</h3>
+      <button id="trackClose" class="text-slate-400 hover:text-slate-700 text-xl leading-none">×</button>
+    </div>
+    <div class="p-5 space-y-4 text-sm">
+      <p class="text-xs text-slate-500 bg-slate-50 rounded-md p-2 leading-relaxed">
+        GPS 로거의 <b>.gpx</b> 트랙을 불러오면, 사진 촬영시각과 트랙 시각을 맞춰 좌표가 없는 사진에 위치를 자동 부여합니다.
+        카메라 시계 오차가 있으면 아래 보정값으로 맞추세요.
+      </p>
+      <button id="gpxPick" class="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md">📂 GPX 파일 선택</button>
+      <div id="trackSummary" class="text-xs text-slate-500"></div>
+
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="block font-medium text-slate-600 mb-1">카메라 시계 보정</label>
+          <div class="flex items-center gap-1">
+            <select id="trackSign" class="border border-slate-300 rounded-md px-1 py-1.5">
+              <option value="1">+</option><option value="-1">−</option>
+            </select>
+            <input id="trackH" type="number" min="0" value="0" class="w-14 border border-slate-300 rounded-md px-2 py-1.5" title="시"/>
+            <span>시</span>
+            <input id="trackM" type="number" min="0" max="59" value="0" class="w-14 border border-slate-300 rounded-md px-2 py-1.5" title="분"/>
+            <span>분</span>
+            <input id="trackS" type="number" min="0" max="59" value="0" class="w-14 border border-slate-300 rounded-md px-2 py-1.5" title="초"/>
+            <span>초</span>
+          </div>
+          <p class="text-[11px] text-slate-400 mt-0.5">사진 시각에 더할 값 (촬영시각이 트랙보다 빠르면 +)</p>
+        </div>
+        <div>
+          <label class="block font-medium text-slate-600 mb-1">허용 시간차(분)</label>
+          <input id="trackTol" type="number" min="0" value="60" class="w-full border border-slate-300 rounded-md px-2 py-1.5"/>
+          <p class="text-[11px] text-slate-400 mt-0.5">트랙 시간 범위 밖이라도 이 시간 내면 끝점에 스냅</p>
+        </div>
+      </div>
+      <div>
+        <label class="block font-medium text-slate-600 mb-1">대상</label>
+        <label class="inline-flex items-center gap-1.5 mr-4"><input type="radio" name="trackScope" value="missing" checked /> GPS 없는 사진만</label>
+        <label class="inline-flex items-center gap-1.5"><input type="radio" name="trackScope" value="all" /> 전체 재태깅</label>
+      </div>
+      <div class="flex justify-end gap-2 pt-2">
+        <button id="trackApply" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium disabled:opacity-40" disabled>적용</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Compare tray (floating, shows picked photos) ===== -->
+<div id="compareTray" class="hidden fixed left-1/2 -translate-x-1/2 bottom-4 z-40 bg-white rounded-xl shadow-2xl border border-slate-200 px-3 py-2 flex items-center gap-3">
+  <span class="text-sm text-slate-600 font-medium">비교 선택</span>
+  <div id="compareThumbs" class="flex items-center gap-2"></div>
+  <button id="compareOpen" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-md disabled:opacity-40">비교하기</button>
+  <button id="compareClear" class="px-2 py-1.5 text-slate-400 hover:text-slate-700 text-sm">비우기</button>
+</div>
+
+<!-- ===== Compare modal (two photos side by side) ===== -->
+<div id="compareModal" class="hidden fixed inset-0 bg-black/80 items-stretch justify-center" style="z-index: 10001;">
+  <div id="compareBody" class="flex w-full h-full">
+    <div class="cmp-panel" data-side="0"></div>
+    <div class="cmp-panel" data-side="1"></div>
+  </div>
+  <button id="compareModalClose" class="absolute top-3 right-4 text-white/90 hover:text-white text-3xl leading-none z-10">×</button>
+</div>
+
+<style>
+  .dctl { font-size: 13px; padding: 4px 10px; border-radius: 6px; background: #fff; border: 1px solid #cbd5e1; cursor: pointer; }
+  .dctl:hover { background: #f1f5f9; }
+
+  /* Compare panels */
+  #compareBody { gap: 2px; }
+  .cmp-panel { position: relative; flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; background: #0b1220; }
+  .cmp-vp { flex: 1; position: relative; overflow: hidden; }
+  .cmp-vp img { position: absolute; top: 50%; left: 50%; transform-origin: center center; max-width: none; user-select: none; -webkit-user-drag: none; will-change: transform; }
+  .cmp-meta { background: rgba(15,23,42,.92); color: #e2e8f0; font-size: 12px; padding: 8px 12px; line-height: 1.5; max-height: 34%; overflow: auto; }
+  .cmp-meta .k { color: #94a3b8; }
+  .compare-thumb { width: 40px; height: 40px; border-radius: 8px; object-fit: cover; border: 2px solid #2563eb; }
+
+  /* Pins picked for comparison get a blue badge ring (selected style is reused). */
+
+  /* ===== Responsive: phone/tablet — detail pane becomes a bottom sheet ===== */
+  @media (max-width: 768px) {
+    #splitter { display: none !important; }
+    #detailPane {
+      position: fixed; left: 0; right: 0; bottom: 0; top: auto;
+      width: auto !important; height: 62vh; max-height: 80vh;
+      border-left: none; border-top: 1px solid #e2e8f0;
+      border-top-left-radius: 16px; border-top-right-radius: 16px;
+      box-shadow: 0 -6px 24px rgba(0,0,0,.22); z-index: 1500;
+    }
+    #detailPane::before {
+      content: ''; position: absolute; top: 7px; left: 50%; transform: translateX(-50%);
+      width: 44px; height: 5px; border-radius: 3px; background: #cbd5e1;
+    }
+    #detailPane > .flex.items-center { padding-top: 14px; }
+    .cmp-panel:nth-child(1) { border-bottom: 2px solid #1e293b; }
+    #compareBody { flex-direction: column; }
+    #compareTray { left: 8px; right: 8px; transform: none; bottom: 8px; }
+  }
+</style>
+
+<script>
+"use strict";
+/* =========================================================================
+   GeoPhoto Map Navigator — single-file client-side app
+   Spec: .omc/specs/deep-interview-geophoto-map-navigator.md
+   ========================================================================= */
+
+/* ---------- State ---------- */
+const State = {
+  photos: [],        // all PhotoMetadata (+ _file)
+  geo: [],           // photos with GPS, sorted by timestamp
+  detailList: [],    // all photos sorted by timestamp (for prev/next)
+  noGpsCount: 0,
+  thumbnailsOn: true,
+  simplifiedMode: 'dot',   // 'dot' | 'heat'
+  pathMode: 'corrected',   // 'corrected' | 'original' | 'off'
+  provider: 'osm',         // 'osm' | 'google' | 'naver' | 'kakao'
+  mapType: 'roadmap',      // 'roadmap' | 'satellite' | 'hybrid'
+  detailIndex: -1,
+  selectedId: null,        // id of the photo currently shown in the detail pane
+  clusters: [],            // geographic clusters of geo photos
+  clusterIndex: -1,        // -1 = viewing all
+  timeFrom: null,          // time-filter start (ms); null = no filter
+  timeTo: null,            // time-filter end (ms)
+  _tmin: 0, _tmax: 0,      // full timestamp range of the loaded set
+  cadastral: false,        // 지적편집도 overlay on/off (Naver/Kakao only)
+  detailUrl: null,         // current detail-pane object URL (lazy; revoked on change)
+  _detailToken: 0,         // guards async detail image loads against fast nav
+  compareMode: false,      // when on, clicking pins picks photos to compare
+  compareSet: [],          // up to 2 photos selected for comparison
+  compareUrls: [null, null], // object URLs for the two compare panels
+  track: [],               // loaded GPX trackpoints [{t, lat, lng, ele}]
+  geocodeCache: {},        // "lat,lng"(rounded) -> place-name string
+};
+
+const PERF_CAP = 800;      // above this many photos, fall back to dots for performance
+
+/* ---------- EXIF parsing: Web Worker with main-thread fallback ----------
+   Parsing hundreds of files with exifr on the UI thread freezes the browser.
+   We run it in a Worker so the UI stays responsive, and fall back to the main
+   thread if the Worker can't be created (e.g. blocked, or CDN unreachable). */
+const EXIF_WORKER_SRC = [
+  "importScripts('https://cdn.jsdelivr.net/npm/exifr/dist/full.umd.js');",
+  "self.onmessage = async (e) => {",
+  "  const { id, file } = e.data;",
+  "  try {",
+  "    const out = await exifr.parse(file, { gps: true, tiff: true, exif: true });",
+  "    self.postMessage({ id, ok: true, data: out || null });",
+  "  } catch (err) { self.postMessage({ id, ok: false, data: null }); }",
+  "};"
+].join('\n');
+
+let exifWorker = null, exifWorkerOk = false;
+function initExifWorker() {
+  try {
+    const blob = new Blob([EXIF_WORKER_SRC], { type: 'application/javascript' });
+    exifWorker = new Worker(URL.createObjectURL(blob));
+    exifWorker.onerror = () => { exifWorkerOk = false; };
+    exifWorkerOk = true;
+  } catch (e) { exifWorker = null; exifWorkerOk = false; }
+}
+
+function parseWithWorker(files, onProgress) {
+  return new Promise((resolve, reject) => {
+    const results = new Array(files.length);
+    let done = 0, settled = false;
+    function cleanup() { exifWorker.removeEventListener('message', onMsg); exifWorker.removeEventListener('error', onErr); }
+    const onMsg = (e) => {
+      const { id, ok, data } = e.data;
+      results[id] = ok ? data : null;
+      done++; onProgress(done, files.length);
+      if (done === files.length && !settled) { settled = true; cleanup(); resolve(results); }
+    };
+    const onErr = () => { if (!settled) { settled = true; cleanup(); reject(new Error('exif worker error')); } };
+    exifWorker.addEventListener('message', onMsg);
+    exifWorker.addEventListener('error', onErr);
+    files.forEach((file, id) => exifWorker.postMessage({ id, file }));
+  });
+}
+
+async function parseOnMain(files, onProgress) {
+  const results = new Array(files.length);
+  for (let i = 0; i < files.length; i++) {
+    try { results[i] = await exifr.parse(files[i], { gps: true, tiff: true, exif: true }); }
+    catch (e) { results[i] = null; }
+    if (i % 5 === 0 || i === files.length - 1) { onProgress(i + 1, files.length); await new Promise(r => setTimeout(r, 0)); }
+  }
+  return results;
+}
+
+async function parseAllExif(files, onProgress) {
+  if (exifWorker && exifWorkerOk) {
+    try { return await parseWithWorker(files, onProgress); }
+    catch (e) { console.warn('EXIF worker failed; using main thread', e); }
+  }
+  return parseOnMain(files, onProgress);
+}
+
+// Pull the fields we care about out of an exifr output object.
+function extractMeta(out) {
+  const m = { lat: null, lng: null, ts: null, direction: null, exif: {} };
+  if (!out) return m;
+  if (typeof out.latitude === 'number' && typeof out.longitude === 'number' && isFinite(out.latitude) && isFinite(out.longitude)) {
+    m.lat = out.latitude; m.lng = out.longitude;
+  }
+  const d = out.DateTimeOriginal || out.CreateDate || out.ModifyDate;
+  if (d instanceof Date && !isNaN(d)) m.ts = d.getTime();
+  else if (typeof d === 'number' && isFinite(d)) m.ts = d;
+  if (typeof out.GPSImgDirection === 'number' && isFinite(out.GPSImgDirection)) m.direction = out.GPSImgDirection;
+  m.exif = {
+    make: out.Make || null,
+    model: out.Model || null,
+    focalLength: (typeof out.FocalLength === 'number') ? out.FocalLength : null,
+    fNumber: (typeof out.FNumber === 'number') ? out.FNumber : null,
+    iso: (out.ISO != null ? out.ISO : (out.ISOSpeedRatings != null ? out.ISOSpeedRatings : null)),
+    altitude: (typeof out.GPSAltitude === 'number') ? out.GPSAltitude : null,
+  };
+  return m;
+}
+
+const Settings = {
+  outlierSpeed: 200,  // km/h
+  gapMinutes: 60,     // path segment break
+  thumbSize: 56,      // px
+  keys: { google: '', naver: '', kakao: '' },
+};
+
+const LS_KEY = 'geophoto.settings.v1';
+
+function loadSettings() {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    if (raw) {
+      const s = JSON.parse(raw);
+      Settings.outlierSpeed = +s.outlierSpeed || 200;
+      Settings.gapMinutes = +s.gapMinutes || 60;
+      Settings.thumbSize = +s.thumbSize || 56;
+      Settings.keys = Object.assign({ google:'', naver:'', kakao:'' }, s.keys || {});
+    }
+  } catch (e) { console.warn('settings load failed', e); }
+}
+function saveSettings() {
+  try { localStorage.setItem(LS_KEY, JSON.stringify(Settings)); }
+  catch (e) { console.warn('settings save failed', e); }
+}
+
+/* ---------- Geo helpers ---------- */
+function haversine(a, b) {
+  const R = 6371000, toRad = x => x * Math.PI / 180;
+  const dLat = toRad(b.lat - a.lat), dLng = toRad(b.lng - a.lng);
+  const la1 = toRad(a.lat), la2 = toRad(b.lat);
+  const h = Math.sin(dLat/2)**2 + Math.cos(la1)*Math.cos(la2)*Math.sin(dLng/2)**2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+function speedKmh(a, b, dtMs) {
+  if (dtMs <= 0) return Infinity;
+  const meters = haversine(a, b);
+  const hours = dtMs / 3600000;
+  return (meters / 1000) / hours;
+}
+
+/* ---------- Outlier detection + correction ---------- */
+function processOutliers(list) {
+  const T = Settings.outlierSpeed;
+  list.forEach(p => { p.isOutlier = false; p.correctedGps = { ...p.originalGps }; });
+
+  // Detect spikes. Interior point: outlier when speed to AND from it both exceed T
+  // (a "there-and-back" jump). Endpoints are disambiguated against the next-inner
+  // point so we don't misflag a good endpoint whose only neighbor is the spike.
+  for (let i = 0; i < list.length; i++) {
+    const prev = list[i-1], cur = list[i], next = list[i+1];
+    const sIn  = prev ? speedKmh(prev.originalGps, cur.originalGps, cur.timestamp - prev.timestamp) : null;
+    const sOut = next ? speedKmh(cur.originalGps, next.originalGps, next.timestamp - cur.timestamp) : null;
+    if (prev && next) {
+      cur.isOutlier = (sIn > T && sOut > T);
+    } else if (!prev && next) {
+      // First point: outlier only if the jump to `next` is large AND `next` itself
+      // continues normally (so `next` is trustworthy and `cur` is the odd one out).
+      const nn = list[i+2];
+      const sNext = nn ? speedKmh(next.originalGps, nn.originalGps, nn.timestamp - next.timestamp) : 0;
+      cur.isOutlier = (sOut > T && sNext <= T);
+    } else if (prev && !next) {
+      // Last point: symmetric to the first-point rule.
+      const pp = list[i-2];
+      const sPrev = pp ? speedKmh(pp.originalGps, prev.originalGps, prev.timestamp - pp.timestamp) : 0;
+      cur.isOutlier = (sIn > T && sPrev <= T);
+    }
+  }
+
+  // Correct: time-proportional linear interpolation between nearest valid neighbors.
+  for (let i = 0; i < list.length; i++) {
+    if (!list[i].isOutlier) continue;
+    let p = i - 1; while (p >= 0 && list[p].isOutlier) p--;
+    let q = i + 1; while (q < list.length && list[q].isOutlier) q++;
+    const P = p >= 0 ? list[p] : null;
+    const Q = q < list.length ? list[q] : null;
+    if (P && Q) {
+      const span = (Q.timestamp - P.timestamp) || 1;
+      const f = (list[i].timestamp - P.timestamp) / span;
+      list[i].correctedGps = {
+        lat: P.correctedGps.lat + (Q.correctedGps.lat - P.correctedGps.lat) * f,
+        lng: P.correctedGps.lng + (Q.correctedGps.lng - P.correctedGps.lng) * f,
+      };
+    } else if (P) { list[i].correctedGps = { ...P.correctedGps }; }
+    else if (Q)   { list[i].correctedGps = { ...Q.correctedGps }; }
+  }
+  return list.filter(p => p.isOutlier).length;
+}
+
+/* ---------- Path segments ---------- */
+function buildSegments(coordKey) {
+  const gapMs = Settings.gapMinutes * 60000;
+  const sorted = visibleGeo();
+  const segs = [];
+  let cur = [];
+  for (let i = 0; i < sorted.length; i++) {
+    if (i > 0 && (sorted[i].timestamp - sorted[i-1].timestamp) > gapMs) {
+      if (cur.length > 1) segs.push(cur);
+      cur = [];
+    }
+    const c = sorted[i][coordKey];
+    cur.push({ lat: c.lat, lng: c.lng });
+  }
+  if (cur.length > 1) segs.push(cur);
+  return segs;
+}
+
+/* ---------- Thumbnail generation ---------- */
+function loadImageEl(file) {
+  return new Promise((res, rej) => {
+    const url = URL.createObjectURL(file);
+    const im = new Image();
+    im.onload = () => { res({ img: im, url }); };
+    im.onerror = () => { URL.revokeObjectURL(url); rej(new Error('img load')); };
+    im.src = url;
+  });
+}
+// Build a "photo pin": circular photo on top + downward triangle pointer whose
+// tip marks the exact GPS coordinate. Returns { url, w, h, ax, ay } where (ax,ay)
+// is the anchor (the pointer tip), so adapters place the tip on the coordinate.
+async function makePin(file, size, outlier, direction) {
+  // Decode the photo to pixels. createImageBitmap honors EXIF orientation; if the
+  // browser cannot decode the format (e.g. HEIC), fall through to an <img> decode,
+  // and if that also fails we still render the pin with a placeholder glyph so the
+  // marker is never missing.
+  let src = null, cleanup = null;
+  try {
+    src = await createImageBitmap(file, { imageOrientation: 'from-image' });
+  } catch (e) {
+    try { const r = await loadImageEl(file); src = r.img; cleanup = r.url; }
+    catch (_) { src = null; }
+  }
+  const sw = src ? (src.width || src.naturalWidth) : 0;
+  const sh = src ? (src.height || src.naturalHeight) : 0;
+
+  const hasDir = (typeof direction === 'number' && isFinite(direction));
+  const ring = 3;
+  const ptr = Math.round(size * 0.34);                  // pointer height below circle
+  const margin = hasDir ? Math.round(size * 0.24) : 4;  // room for the direction arrow
+  const W = size + margin * 2;
+  const H = margin + size + ptr;
+  const cx = W / 2, cy = margin + size / 2, r = size / 2 - ring;
+  const ringColor = outlier ? '#f59e0b' : '#ffffff';
+
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const ctx = c.getContext('2d');
+
+  // Pointer triangle first, so the circle overlaps its top edge (looks unified).
+  const baseHalf = size * 0.17;
+  ctx.fillStyle = ringColor;
+  ctx.beginPath();
+  ctx.moveTo(cx - baseHalf, cy + r - ring);
+  ctx.lineTo(cx + baseHalf, cy + r - ring);
+  ctx.lineTo(cx, H - 1);
+  ctx.closePath();
+  ctx.fill();
+
+  // Photo (center-cropped square) clipped into the circle.
+  ctx.save();
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2); ctx.closePath(); ctx.clip();
+  if (sw > 0 && sh > 0) {
+    const s = Math.min(sw, sh);
+    const sx = (sw - s) / 2, sy = (sh - s) / 2;
+    ctx.drawImage(src, sx, sy, s, s, cx - r, cy - r, r * 2, r * 2);
+  } else {
+    // Undecodable image: neutral fill + camera glyph so the marker still appears.
+    ctx.fillStyle = '#94a3b8';
+    ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+    ctx.fillStyle = '#fff';
+    ctx.font = `${Math.round(size * 0.42)}px sans-serif`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('📷', cx, cy + 1);
+  }
+  ctx.restore();
+
+  // Ring around the circle.
+  ctx.lineWidth = ring; ctx.strokeStyle = ringColor;
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2); ctx.stroke();
+
+  // Shooting-direction arrow (GPSImgDirection): north = 0, increasing clockwise.
+  if (hasDir) {
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(direction * Math.PI / 180);
+    const tip = -(r + size * 0.20), base = -(r + size * 0.01), half = size * 0.15;
+    ctx.beginPath();
+    ctx.moveTo(0, tip);
+    ctx.lineTo(-half, base);
+    ctx.lineTo(half, base);
+    ctx.closePath();
+    ctx.fillStyle = '#1d4ed8';
+    ctx.lineWidth = 1.5; ctx.strokeStyle = '#ffffff';
+    ctx.fill(); ctx.stroke();
+    ctx.restore();
+  }
+
+  if (src && src.close) src.close();
+  if (cleanup) URL.revokeObjectURL(cleanup);
+  return { url: c.toDataURL('image/png'), w: W, h: H, ax: cx, ay: H };
+}
+
+/* ---------- EXIF / folder loading ---------- */
+function isImage(file) {
+  return /^image\//.test(file.type) || /\.(jpe?g|png|tiff?|heic|heif|webp)$/i.test(file.name);
+}
+
+async function loadFiles(fileList) {
+  const files = Array.from(fileList).filter(isImage);
+  if (!files.length) { setOverlay('이미지 파일을 찾지 못했습니다.'); return; }
+
+  releaseDetailUrl();
+  State.photos = []; State.geo = []; State.detailList = []; State.noGpsCount = 0;
+  State.timeFrom = null; State.timeTo = null;
+  closeDetail();
+
+  // EXIF parsing (off the UI thread when possible).
+  showLoading(true, `EXIF 분석 중… 0 / ${files.length}`);
+  const metas = await parseAllExif(files, (done, total) => setLoadingText(`EXIF 분석 중… ${done} / ${total}`));
+
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i];
+    const m = extractMeta(metas[i]);
+    const ts = (m.ts != null) ? m.ts : (file.lastModified || Date.now());
+    const hasGps = m.lat != null && m.lng != null;
+    const photo = {
+      id: 'p' + i + '_' + Math.random().toString(36).slice(2, 7),
+      fileName: file.name,
+      pin: null,
+      timestamp: ts,
+      originalGps: hasGps ? { lat: m.lat, lng: m.lng } : null,
+      correctedGps: hasGps ? { lat: m.lat, lng: m.lng } : null,
+      isOutlier: false,
+      hasGps,
+      direction: m.direction,
+      exif: m.exif,
+      placeName: null,      // filled by reverse geocoding
+      fromTrack: false,     // true if coordinates came from a GPX track
+      _file: file,          // kept for lazy detail-view URL + thumbnail regen
+      _displayBlob: null,   // cached browser-decodable blob (HEIC conversion)
+    };
+    State.photos.push(photo);
+    if (!hasGps) State.noGpsCount++;
+  }
+
+  // Build sorted lists
+  State.detailList = State.photos.slice().sort((a, b) => a.timestamp - b.timestamp);
+  State.geo = State.photos.filter(p => p.hasGps).sort((a, b) => a.timestamp - b.timestamp);
+
+  // Outlier detection + correction (on geo set)
+  const corrected = processOutliers(State.geo);
+
+  // Thumbnails (small canvas; main thread is fine here) — include direction arrow.
+  // displayBlob converts HEIC once so the thumbnail shows the real photo.
+  let g = 0;
+  for (const p of State.geo) {
+    g++;
+    p.pin = await makePin(await displayBlob(p), Settings.thumbSize, p.isOutlier, p.direction);
+    if (g % 4 === 0 || g === State.geo.length) {
+      setLoadingText(`썸네일 생성 중… ${g} / ${State.geo.length}`);
+      await new Promise(r => setTimeout(r, 0));
+    }
+  }
+
+  computeClusters();
+  populateClusterNav();
+  setupTimeSlider();
+
+  showLoading(false);
+  updateStatus(corrected);
+
+  if (!State.geo.length) {
+    setOverlay(`GPS 정보가 있는 사진이 없습니다. (총 ${State.photos.length}장, GPS 없음 ${State.noGpsCount}장)`);
+    return;
+  }
+  hideOverlay();
+  await ensureMapReady(true);
+}
+
+/* =========================================================================
+   Map adapter layer
+   ========================================================================= */
+function loadScript(src) {
+  return new Promise((res, rej) => {
+    const s = document.createElement('script');
+    s.src = src; s.async = true;
+    s.onload = () => res();
+    s.onerror = () => rej(new Error('Failed to load ' + src));
+    document.head.appendChild(s);
+  });
+}
+// Return a FRESH inner element for the map library to initialize on. Reusing the
+// same #map node across providers breaks Leaflet (it stamps the node with a
+// _leaflet_id and then refuses to re-init: "Map container is already initialized").
+// A new child element each time guarantees a clean container for every provider.
+function prepareContainer() {
+  const host = document.getElementById('map');
+  host.innerHTML = '';
+  const inner = document.createElement('div');
+  inner.style.width = '100%';
+  inner.style.height = '100%';
+  host.appendChild(inner);
+  return inner;
+}
+function dataCoords() { return State.geo.map(p => p.correctedGps); }
+
+/* --- Google adapter --- */
+function createGoogle() {
+  let map = null, loaded = false, projHelper = null;
+  let markers = [], paths = [], viewCb = null;
+  return {
+    get ready() { return !!map; },
+    async ensureLoaded() {
+      const key = Settings.keys.google;
+      if (!key) throw new NoKeyError('google');
+      if (!loaded) {
+        await new Promise((res, rej) => {
+          window.__gmapReady = () => res();
+          loadScript(`https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}&v=weekly&loading=async&callback=__gmapReady`)
+            .catch(rej);
+        });
+        loaded = true;
+      }
+      const el = prepareContainer();
+      map = new google.maps.Map(el, { center: { lat: 37.5665, lng: 126.9780 }, zoom: 12, mapTypeControl: false, streetViewControl: false });
+      projHelper = new google.maps.OverlayView();
+      projHelper.onAdd = function(){}; projHelper.draw = function(){};
+      projHelper.setMap(map);
+      map.addListener('idle', () => { if (viewCb) viewCb(); });
+    },
+    fitTo(coords) {
+      if (!coords.length) return;
+      const b = new google.maps.LatLngBounds();
+      coords.forEach(c => b.extend(new google.maps.LatLng(c.lat, c.lng)));
+      map.fitBounds(b);
+      if (coords.length === 1) map.setZoom(15);
+    },
+    panTo(c) { map.panTo({ lat: c.lat, lng: c.lng }); },
+    reset() { map = null; projHelper = null; markers = []; paths = []; },
+    setMapType(t) { if (map) map.setMapTypeId({ roadmap: 'roadmap', satellite: 'satellite', hybrid: 'hybrid' }[t] || 'roadmap'); },
+    onContainerResize() { if (map) google.maps.event.trigger(map, 'resize'); },
+    clearMarkers() { markers.forEach(m => m.setMap(null)); markers = []; },
+    clearPaths() { paths.forEach(p => p.setMap(null)); paths = []; },
+    addThumb(photo, coord, size, onClick, selected) {
+      const pin = photo.pin; if (!pin) return;
+      const scale = selected ? 1.3 : 1;
+      const m = new google.maps.Marker({
+        position: coord, map,
+        icon: { url: pin.url, scaledSize: new google.maps.Size(pin.w * scale, pin.h * scale), anchor: new google.maps.Point(pin.ax * scale, pin.ay * scale) },
+        title: photo.fileName, zIndex: selected ? 1000 : (photo.isOutlier ? 50 : 10),
+      });
+      m.addListener('click', onClick);
+      markers.push(m);
+    },
+    addDot(photo, coord, kind, onClick, selected) {
+      const color = photo.isOutlier ? '#f59e0b' : '#2563eb';
+      const icon = kind === 'heat'
+        ? { path: google.maps.SymbolPath.CIRCLE, scale: 22, fillColor: '#ef4444', fillOpacity: 0.22, strokeWeight: 0 }
+        : { path: google.maps.SymbolPath.CIRCLE, scale: selected ? 9 : 6, fillColor: color, fillOpacity: 0.9, strokeColor: selected ? '#1d4ed8' : '#fff', strokeWeight: selected ? 3 : 1.2 };
+      const m = new google.maps.Marker({ position: coord, map, icon, clickable: kind !== 'heat', zIndex: selected ? 1000 : undefined });
+      if (kind !== 'heat') m.addListener('click', onClick);
+      markers.push(m);
+    },
+    addConnectors(lines, color) {
+      lines.forEach(([a, b]) => {
+        const pl = new google.maps.Polyline({ path: [a, b], map, strokeColor: color, strokeOpacity: 0.7, strokeWeight: 1.5, zIndex: 5 });
+        markers.push(pl);
+      });
+    },
+    drawPath(segments, color, opacity) {
+      segments.forEach(seg => {
+        const pl = new google.maps.Polyline({
+          path: seg.map(c => ({ lat: c.lat, lng: c.lng })), map,
+          strokeColor: color, strokeOpacity: opacity, strokeWeight: 2,
+        });
+        paths.push(pl);
+      });
+    },
+    projectPixel(c) {
+      if (!projHelper) return null;
+      const proj = projHelper.getProjection();
+      if (!proj) return null;
+      const p = proj.fromLatLngToContainerPixel(new google.maps.LatLng(c.lat, c.lng));
+      return p ? { x: p.x, y: p.y } : null;
+    },
+    unproject(pt) {
+      if (!projHelper) return null;
+      const proj = projHelper.getProjection();
+      if (!proj) return null;
+      const ll = proj.fromContainerPixelToLatLng(new google.maps.Point(pt.x, pt.y));
+      return ll ? { lat: ll.lat(), lng: ll.lng() } : null;
+    },
+    onViewChange(cb) { viewCb = cb; },
+  };
+}
+
+/* --- Naver adapter --- */
+function createNaver() {
+  let map = null, loaded = false;
+  let markers = [], paths = [], viewCb = null;
+  let cadastralLayer = null;
+  return {
+    get ready() { return !!map; },
+    async ensureLoaded() {
+      const key = Settings.keys.naver;
+      if (!key) throw new NoKeyError('naver');
+      if (!loaded) {
+        await loadScript(`https://oapi.map.naver.com/openapi/v3/maps.js?ncpClientId=${encodeURIComponent(key)}`);
+        loaded = true;
+      }
+      const el = prepareContainer();
+      map = new naver.maps.Map(el, { center: new naver.maps.LatLng(37.5665, 126.9780), zoom: 12 });
+      naver.maps.Event.addListener(map, 'idle', () => { if (viewCb) viewCb(); });
+    },
+    fitTo(coords) {
+      if (!coords.length) return;
+      let minLat=90,maxLat=-90,minLng=180,maxLng=-180;
+      coords.forEach(c => { minLat=Math.min(minLat,c.lat); maxLat=Math.max(maxLat,c.lat); minLng=Math.min(minLng,c.lng); maxLng=Math.max(maxLng,c.lng); });
+      if (coords.length === 1) { map.setCenter(new naver.maps.LatLng(coords[0].lat, coords[0].lng)); map.setZoom(15); return; }
+      const b = new naver.maps.LatLngBounds(new naver.maps.LatLng(minLat, minLng), new naver.maps.LatLng(maxLat, maxLng));
+      map.fitBounds(b);
+    },
+    panTo(c) { map.panTo(new naver.maps.LatLng(c.lat, c.lng)); },
+    reset() { map = null; markers = []; paths = []; cadastralLayer = null; },
+    setMapType(t) {
+      if (!map) return;
+      const M = naver.maps.MapTypeId;
+      map.setMapTypeId({ roadmap: M.NORMAL, satellite: M.SATELLITE, hybrid: M.HYBRID }[t] || M.NORMAL);
+    },
+    setCadastral(on) {
+      if (!map) return;
+      if (on) {
+        if (!cadastralLayer) cadastralLayer = new naver.maps.CadastralLayer();
+        cadastralLayer.setMap(map);
+      } else if (cadastralLayer) {
+        cadastralLayer.setMap(null);
+      }
+    },
+    onContainerResize() { try { if (map) window.dispatchEvent(new Event('resize')); } catch (e) {} },
+    clearMarkers() { markers.forEach(m => m.setMap(null)); markers = []; },
+    clearPaths() { paths.forEach(p => p.setMap(null)); paths = []; },
+    addThumb(photo, coord, size, onClick, selected) {
+      const pin = photo.pin; if (!pin) return;
+      const sc = selected ? 1.3 : 1;
+      const m = new naver.maps.Marker({
+        position: new naver.maps.LatLng(coord.lat, coord.lng), map,
+        icon: {
+          url: pin.url,
+          size: new naver.maps.Size(pin.w, pin.h),
+          scaledSize: new naver.maps.Size(pin.w * sc, pin.h * sc),
+          anchor: new naver.maps.Point(pin.ax * sc, pin.ay * sc),
+        },
+        zIndex: selected ? 1000 : (photo.isOutlier ? 50 : 10),
+      });
+      naver.maps.Event.addListener(m, 'click', onClick);
+      markers.push(m);
+    },
+    addDot(photo, coord, kind, onClick, selected) {
+      const sz = kind === 'heat' ? 46 : 13;
+      const cls = kind === 'heat' ? 'heat-marker' : ('dot-marker' + (photo.isOutlier ? ' outlier' : '') + (selected ? ' selected' : ''));
+      const m = new naver.maps.Marker({
+        position: new naver.maps.LatLng(coord.lat, coord.lng), map,
+        icon: { content: `<div class="${cls}"></div>`, anchor: new naver.maps.Point(sz/2, sz/2) },
+        zIndex: selected ? 1000 : undefined,
+      });
+      if (kind !== 'heat') naver.maps.Event.addListener(m, 'click', onClick);
+      markers.push(m);
+    },
+    addConnectors(lines, color) {
+      lines.forEach(([a, b]) => {
+        const pl = new naver.maps.Polyline({
+          map, path: [new naver.maps.LatLng(a.lat, a.lng), new naver.maps.LatLng(b.lat, b.lng)],
+          strokeColor: color, strokeOpacity: 0.7, strokeWeight: 1.5,
+        });
+        markers.push(pl);
+      });
+    },
+    drawPath(segments, color, opacity) {
+      segments.forEach(seg => {
+        const pl = new naver.maps.Polyline({
+          map, path: seg.map(c => new naver.maps.LatLng(c.lat, c.lng)),
+          strokeColor: color, strokeOpacity: opacity, strokeWeight: 2,
+        });
+        paths.push(pl);
+      });
+    },
+    projectPixel(c) {
+      try {
+        const proj = map.getProjection();
+        const p = proj.fromCoordToOffset(new naver.maps.LatLng(c.lat, c.lng));
+        return { x: p.x, y: p.y };
+      } catch (e) { return null; }
+    },
+    unproject(pt) {
+      try {
+        const proj = map.getProjection();
+        const ll = proj.fromOffsetToCoord(new naver.maps.Point(pt.x, pt.y));
+        return { lat: ll.lat(), lng: ll.lng() };
+      } catch (e) { return null; }
+    },
+    onViewChange(cb) { viewCb = cb; },
+  };
+}
+
+/* --- Kakao adapter --- */
+function createKakao() {
+  let map = null, loaded = false;
+  let markers = [], paths = [], viewCb = null;
+  return {
+    get ready() { return !!map; },
+    async ensureLoaded() {
+      const key = Settings.keys.kakao;
+      if (!key) throw new NoKeyError('kakao');
+      if (!loaded) {
+        await loadScript(`https://dapi.kakao.com/v2/maps/sdk.js?appkey=${encodeURIComponent(key)}&autoload=false`);
+        await new Promise(res => kakao.maps.load(res));
+        loaded = true;
+      }
+      const el = prepareContainer();
+      map = new kakao.maps.Map(el, { center: new kakao.maps.LatLng(37.5665, 126.9780), level: 6 });
+      kakao.maps.event.addListener(map, 'idle', () => { if (viewCb) viewCb(); });
+    },
+    fitTo(coords) {
+      if (!coords.length) return;
+      if (coords.length === 1) { map.setCenter(new kakao.maps.LatLng(coords[0].lat, coords[0].lng)); map.setLevel(4); return; }
+      const b = new kakao.maps.LatLngBounds();
+      coords.forEach(c => b.extend(new kakao.maps.LatLng(c.lat, c.lng)));
+      map.setBounds(b);
+    },
+    panTo(c) { map.panTo(new kakao.maps.LatLng(c.lat, c.lng)); },
+    reset() { map = null; markers = []; paths = []; },
+    setMapType(t) {
+      if (!map) return;
+      const M = kakao.maps.MapTypeId;
+      map.setMapTypeId({ roadmap: M.ROADMAP, satellite: M.SKYVIEW, hybrid: M.HYBRID }[t] || M.ROADMAP);
+    },
+    setCadastral(on) {
+      if (!map) return;
+      const T = kakao.maps.MapTypeId.USE_DISTRICT; // 지적편집도
+      if (on) map.addOverlayMapTypeId(T); else map.removeOverlayMapTypeId(T);
+    },
+    onContainerResize() { if (map) map.relayout(); },
+    clearMarkers() { markers.forEach(m => m.setMap(null)); markers = []; },
+    clearPaths() { paths.forEach(p => p.setMap(null)); paths = []; },
+    addThumb(photo, coord, size, onClick, selected) {
+      const pin = photo.pin; if (!pin) return;
+      const img = document.createElement('img');
+      img.src = pin.url; img.width = pin.w; img.height = pin.h;
+      img.className = 'photo-pin-img' + (selected ? ' selected' : '');
+      img.addEventListener('click', onClick);
+      const ov = new kakao.maps.CustomOverlay({
+        position: new kakao.maps.LatLng(coord.lat, coord.lng),
+        content: img, xAnchor: pin.ax / pin.w, yAnchor: pin.ay / pin.h, zIndex: selected ? 1000 : (photo.isOutlier ? 50 : 10),
+      });
+      ov.setMap(map);
+      markers.push(ov);
+    },
+    addDot(photo, coord, kind, onClick, selected) {
+      const el = document.createElement('div');
+      el.className = kind === 'heat' ? 'heat-marker' : ('dot-marker' + (photo.isOutlier ? ' outlier' : '') + (selected ? ' selected' : ''));
+      if (kind !== 'heat') el.addEventListener('click', onClick);
+      const ov = new kakao.maps.CustomOverlay({
+        position: new kakao.maps.LatLng(coord.lat, coord.lng),
+        content: el, xAnchor: 0.5, yAnchor: 0.5, zIndex: selected ? 1000 : 0,
+      });
+      ov.setMap(map);
+      markers.push(ov);
+    },
+    addConnectors(lines, color) {
+      lines.forEach(([a, b]) => {
+        const pl = new kakao.maps.Polyline({
+          path: [new kakao.maps.LatLng(a.lat, a.lng), new kakao.maps.LatLng(b.lat, b.lng)],
+          strokeWeight: 1.5, strokeColor: color, strokeOpacity: 0.7, strokeStyle: 'solid',
+        });
+        pl.setMap(map);
+        markers.push(pl);
+      });
+    },
+    drawPath(segments, color, opacity) {
+      segments.forEach(seg => {
+        const pl = new kakao.maps.Polyline({
+          path: seg.map(c => new kakao.maps.LatLng(c.lat, c.lng)),
+          strokeWeight: 2, strokeColor: color, strokeOpacity: opacity, strokeStyle: 'solid',
+        });
+        pl.setMap(map);
+        paths.push(pl);
+      });
+    },
+    projectPixel(c) {
+      try {
+        const proj = map.getProjection();
+        const p = proj.containerPointFromCoords(new kakao.maps.LatLng(c.lat, c.lng));
+        return { x: p.x, y: p.y };
+      } catch (e) { return null; }
+    },
+    unproject(pt) {
+      try {
+        const proj = map.getProjection();
+        const ll = proj.coordsFromContainerPoint(new kakao.maps.Point(pt.x, pt.y));
+        return { lat: ll.getLat(), lng: ll.getLng() };
+      } catch (e) { return null; }
+    },
+    onViewChange(cb) { viewCb = cb; },
+  };
+}
+
+/* --- Leaflet / OpenStreetMap adapter (no API key required) --- */
+function createLeaflet() {
+  let map = null, loaded = false, viewCb = null;
+  let markerLayer = null, pathLayer = null;
+  let baseLayers = {}, labelLayer = null, currentType = 'roadmap';
+
+  function applyType(t) {
+    currentType = t;
+    if (!map) return;
+    Object.values(baseLayers).forEach(l => { if (map.hasLayer(l)) map.removeLayer(l); });
+    if (labelLayer && map.hasLayer(labelLayer)) map.removeLayer(labelLayer);
+    if (t === 'satellite') { baseLayers.sat.addTo(map); }
+    else if (t === 'hybrid') { baseLayers.sat.addTo(map); labelLayer.addTo(map); }
+    else { baseLayers.osm.addTo(map); }
+  }
+  return {
+    get ready() { return !!map; },
+    async ensureLoaded() {
+      if (!loaded) {
+        if (!document.getElementById('leaflet-css')) {
+          const link = document.createElement('link');
+          link.id = 'leaflet-css'; link.rel = 'stylesheet';
+          link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+          document.head.appendChild(link);
+        }
+        if (typeof L === 'undefined') await loadScript('https://unpkg.com/leaflet@1.9.4/dist/leaflet.js');
+        loaded = true;
+      }
+      const el = prepareContainer();
+      map = L.map(el, { zoomControl: true }).setView([37.5665, 126.9780], 12);
+      baseLayers.osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap contributors' });
+      baseLayers.sat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19, attribution: 'Tiles © Esri' });
+      labelLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19 });
+      markerLayer = L.layerGroup().addTo(map);
+      pathLayer = L.layerGroup().addTo(map);
+      applyType(currentType);
+      map.on('moveend zoomend', () => { if (viewCb) viewCb(); });
+      setTimeout(() => { if (map) map.invalidateSize(); }, 0);
+    },
+    reset() { if (map) { try { map.remove(); } catch (e) {} } map = null; markerLayer = null; pathLayer = null; baseLayers = {}; labelLayer = null; },
+    setMapType(t) { if (map) applyType(t); else currentType = t; },
+    onContainerResize() { if (map) map.invalidateSize(); },
+    fitTo(coords) {
+      if (!coords.length) return;
+      if (coords.length === 1) { map.setView([coords[0].lat, coords[0].lng], 15); return; }
+      map.fitBounds(coords.map(c => [c.lat, c.lng]), { padding: [40, 40] });
+    },
+    panTo(c) { map.panTo([c.lat, c.lng]); },
+    clearMarkers() { if (markerLayer) markerLayer.clearLayers(); },
+    clearPaths() { if (pathLayer) pathLayer.clearLayers(); },
+    addThumb(photo, coord, size, onClick, selected) {
+      const pin = photo.pin; if (!pin) return;
+      const icon = L.divIcon({
+        className: 'photo-pin-icon' + (selected ? ' selected' : ''),
+        html: `<img src="${pin.url}" width="${pin.w}" height="${pin.h}" alt="">`,
+        iconSize: [pin.w, pin.h], iconAnchor: [pin.ax, pin.ay],
+      });
+      const m = L.marker([coord.lat, coord.lng], { icon, zIndexOffset: selected ? 1000 : (photo.isOutlier ? 500 : 0), title: photo.fileName });
+      m.on('click', onClick); m.addTo(markerLayer);
+    },
+    addDot(photo, coord, kind, onClick, selected) {
+      if (kind === 'heat') {
+        L.circleMarker([coord.lat, coord.lng], { radius: 18, stroke: false, fillColor: '#ef4444', fillOpacity: 0.22, interactive: false }).addTo(markerLayer);
+      } else {
+        const color = photo.isOutlier ? '#f59e0b' : '#2563eb';
+        const m = L.circleMarker([coord.lat, coord.lng], { radius: selected ? 9 : 6, weight: selected ? 3 : 1.4, color: selected ? '#1d4ed8' : '#fff', fillColor: color, fillOpacity: 0.95 });
+        m.on('click', onClick); m.addTo(markerLayer);
+      }
+    },
+    addConnectors(lines, color) {
+      lines.forEach(([a, b]) => {
+        L.polyline([[a.lat, a.lng], [b.lat, b.lng]], { color, weight: 1.5, opacity: 0.7, interactive: false }).addTo(markerLayer);
+      });
+    },
+    drawPath(segments, color, opacity) {
+      segments.forEach(seg => { L.polyline(seg.map(c => [c.lat, c.lng]), { color, opacity, weight: 2 }).addTo(pathLayer); });
+    },
+    projectPixel(c) {
+      try { const p = map.latLngToContainerPoint([c.lat, c.lng]); return { x: p.x, y: p.y }; }
+      catch (e) { return null; }
+    },
+    unproject(pt) {
+      try { const ll = map.containerPointToLatLng([pt.x, pt.y]); return { lat: ll.lat, lng: ll.lng }; }
+      catch (e) { return null; }
+    },
+    onViewChange(cb) { viewCb = cb; },
+  };
+}
+
+class NoKeyError extends Error {
+  constructor(provider) { super('No API key for ' + provider); this.provider = provider; }
+}
+
+const Adapters = { osm: createLeaflet(), google: createGoogle(), naver: createNaver(), kakao: createKakao() };
+function adapter() { return Adapters[State.provider]; }
+
+let viewRenderTimer = null;
+async function ensureMapReady(fit) {
+  const a = adapter();
+  try {
+    if (!a.ready) {
+      await a.ensureLoaded();
+      a.onViewChange(() => {
+        clearTimeout(viewRenderTimer);
+        viewRenderTimer = setTimeout(renderMarkers, 150);
+      });
+    }
+    if (a.setMapType) a.setMapType(State.mapType);
+    if (a.setCadastral) a.setCadastral(State.cadastral);
+    updateCadastralButton();
+    renderAll();
+    if (State.geo.length) { hideOverlay(); if (fit) a.fitTo(dataCoords()); }
+  } catch (e) {
+    if (e instanceof NoKeyError) {
+      setOverlay(`${providerName(e.provider)} 지도 키가 필요합니다. ⚙️ 설정에서 API 키를 입력하세요.`);
+    } else {
+      console.error(e);
+      setOverlay('지도를 불러오지 못했습니다. API 키와 도메인 설정을 확인하세요.');
+    }
+  }
+}
+function providerName(p) { return { osm: 'OpenStreetMap', google: 'Google', naver: 'Naver', kakao: 'Kakao' }[p] || p; }
+
+/* ---------- Rendering ---------- */
+function renderAll() { renderPaths(); renderMarkers(); }
+
+function renderPaths() {
+  const a = adapter();
+  if (!a.ready) return;
+  a.clearPaths();
+  if (State.pathMode === 'off') return;
+  const key = State.pathMode === 'original' ? 'originalGps' : 'correctedGps';
+  const color = State.pathMode === 'original' ? '#9333ea' : '#2563eb';
+  a.drawPath(buildSegments(key), color, 0.7);
+}
+
+const SPIDER_COMPACTNESS = 0.5; // 1 = previous spacing; 0.5 = about 50% tighter overlap
+const SPIDER_MIN_RADIUS_RATIO = 0.32; // prevents "perfectly stacked" thumbnails
+const SPIDER_MIN_STEP_RATIO = 0.28;
+const HEAT_COLLAPSE_MIN = 4; // broad scale: 1 thumbnail + heat for the rest
+const HEAT_COLLAPSE_SPREAD_MAX = 0.42;
+
+// Lay out n points on concentric rings around an origin. `spread` is scale-aware:
+// at country/region scale we intentionally allow overlap so the marker group stays
+// close to its true position; at site/street scale it approaches full spiderfy.
+function radialLayout(n, size, spread = 1) {
+  const res = [];
+  const s = Math.max(0.12, Math.min(1, spread));
+  const firstR = Math.max(size * SPIDER_MIN_RADIUS_RATIO, size * (0.14 + 0.76 * s) * SPIDER_COMPACTNESS);
+  const ringStep = Math.max(size * SPIDER_MIN_STEP_RATIO, size * (0.20 + 0.80 * s) * SPIDER_COMPACTNESS);
+  const pinStep = Math.max(size * SPIDER_MIN_STEP_RATIO, size * (0.38 + 0.57 * s) * SPIDER_COMPACTNESS);
+  let placed = 0, ring = 1;
+  while (placed < n) {
+    const r = firstR + (ring - 1) * ringStep;
+    const cap = Math.max(1, Math.floor((2 * Math.PI * r) / pinStep));
+    const cnt = Math.min(cap, n - placed);
+    for (let i = 0; i < cnt; i++) {
+      const ang = (2 * Math.PI * i) / cnt - Math.PI / 2 + ring * 0.5;
+      res.push({ x: Math.cos(ang) * r, y: Math.sin(ang) * r });
+    }
+    placed += cnt; ring++;
+  }
+  return res;
+}
+
+// Union photos whose pins are within `thr` pixels of each other (transitive).
+// Uses a spatial grid (cell = thr) so each point only compares against its own
+// and 8 neighbouring cells — O(n) for spread data instead of O(n^2).
+function groupByPixelProximity(items, thr) {
+  const n = items.length;
+  const parent = Array.from({ length: n }, (_, i) => i);
+  const find = i => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; };
+  const uni = (i, j) => { const a = find(i), b = find(j); if (a !== b) parent[a] = b; };
+  const thr2 = thr * thr;
+  const grid = new Map();
+  const cellOf = it => [Math.floor(it.px.x / thr), Math.floor(it.px.y / thr)];
+  items.forEach((it, i) => { const [cx, cy] = cellOf(it); const k = cx + '|' + cy; (grid.get(k) || grid.set(k, []).get(k)).push(i); });
+  items.forEach((it, i) => {
+    const [cx, cy] = cellOf(it);
+    for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) {
+      const bucket = grid.get((cx + dx) + '|' + (cy + dy));
+      if (!bucket) continue;
+      for (const j of bucket) {
+        if (j <= i) continue;
+        const ddx = it.px.x - items[j].px.x, ddy = it.px.y - items[j].px.y;
+        if (ddx * ddx + ddy * ddy < thr2) uni(i, j);
+      }
+    }
+  });
+  const map = new Map();
+  items.forEach((it, i) => { const r = find(i); if (!map.has(r)) map.set(r, []); map.get(r).push(it); });
+  return [...map.values()];
+}
+
+function metersPerPixelAt(adapter, coord) {
+  if (!adapter.projectPixel || !coord) return Infinity;
+  const base = adapter.projectPixel(coord);
+  if (!base) return Infinity;
+  const latRad = coord.lat * Math.PI / 180;
+  const lngDeltaFor100m = 100 / (111320 * Math.max(0.15, Math.cos(latRad)));
+  const probe = adapter.projectPixel({ lat: coord.lat, lng: coord.lng + lngDeltaFor100m });
+  if (!probe) return Infinity;
+  const px = Math.hypot(probe.x - base.x, probe.y - base.y);
+  return px > 0 ? 100 / px : Infinity;
+}
+
+function spiderSpreadForGroup(adapter, group) {
+  const center = group.reduce((acc, it) => {
+    acc.lat += it.p.correctedGps.lat;
+    acc.lng += it.p.correctedGps.lng;
+    return acc;
+  }, { lat: 0, lng: 0 });
+  center.lat /= group.length;
+  center.lng /= group.length;
+
+  const mpp = metersPerPixelAt(adapter, center);
+  if (!isFinite(mpp)) return 0.45;
+
+  // 250m/px+ means broad-region or country view: keep thumbnails near the true
+  // coordinate. Around 20m/px and below means local/site view: spread clearly.
+  const t = (Math.log(250) - Math.log(Math.max(1, mpp))) / (Math.log(250) - Math.log(20));
+  return Math.max(0.16, Math.min(1, t));
+}
+
+function representativePhoto(group) {
+  const picked = group.find(it => isPicked(it.p));
+  if (picked) return picked.p;
+  return group.reduce((best, it) => it.p.timestamp < best.timestamp ? it.p : best, group[0].p);
+}
+
+function renderMarkers() {
+  const a = adapter();
+  if (!a.ready) return;
+  a.clearMarkers();
+  const sel = State.selectedId;
+  const vg = visibleGeo();
+  // Above PERF_CAP photos, fall back to dots to keep a very large set responsive.
+  const tooMany = vg.length > PERF_CAP;
+  const useThumbs = State.thumbnailsOn && !tooMany;
+
+  if (!useThumbs) {
+    const kind = State.simplifiedMode; // dot | heat
+    for (const p of vg) a.addDot(p, p.correctedGps, kind, () => onPinClick(p), isPicked(p));
+    updateStatus(undefined, { tooMany, useThumbs });
+    return;
+  }
+
+  // Thumbnails. Spiderfy overlapping pins: fan them out radially around their
+  // shared screen position and draw a connector from each true coordinate to its
+  // displaced pin tip, so every photo stays visible and clickable.
+  const size = Settings.thumbSize;
+  const items = vg.map(p => ({ p, px: a.projectPixel ? a.projectPixel(p.correctedGps) : null }));
+  const haveProjection = a.unproject && items.every(it => it.px);
+
+  if (!haveProjection) {
+    for (const it of items) a.addThumb(it.p, it.p.correctedGps, size, () => onPinClick(it.p), isPicked(it.p));
+    updateStatus(undefined, { tooMany, useThumbs });
+    return;
+  }
+
+  const groups = groupByPixelProximity(items, size * 0.8);
+  const connectors = [];
+  for (const grp of groups) {
+    if (grp.length === 1) {
+      for (const it of grp) a.addThumb(it.p, it.p.correctedGps, size, () => onPinClick(it.p), isPicked(it.p));
+      continue;
+    }
+    const ax = grp.reduce((s, it) => s + it.px.x, 0) / grp.length;
+    const ay = grp.reduce((s, it) => s + it.px.y, 0) / grp.length;
+    const spread = spiderSpreadForGroup(a, grp);
+    if (grp.length >= HEAT_COLLAPSE_MIN && spread <= HEAT_COLLAPSE_SPREAD_MAX) {
+      const rep = representativePhoto(grp);
+      const centerCoord = a.unproject({ x: ax, y: ay }) || rep.correctedGps;
+      for (const it of grp) {
+        if (it.p.id !== rep.id) a.addDot(it.p, it.p.correctedGps, 'heat', () => {}, false);
+      }
+      a.addThumb(rep, centerCoord, size, () => onPinClick(rep), isPicked(rep));
+      continue;
+    }
+    const layout = radialLayout(grp.length, size, spread);
+    grp.forEach((it, idx) => {
+      const off = layout[idx];
+      const disp = a.unproject({ x: ax + off.x, y: ay + off.y });
+      if (!disp) { a.addThumb(it.p, it.p.correctedGps, size, () => onPinClick(it.p), isPicked(it.p)); return; }
+      if (Math.hypot(off.x, off.y) > 10) connectors.push([it.p.correctedGps, disp]);
+      a.addThumb(it.p, disp, size, () => onPinClick(it.p), isPicked(it.p));
+    });
+  }
+  if (connectors.length && a.addConnectors) a.addConnectors(connectors, '#475569');
+  updateStatus(undefined, { tooMany, useThumbs });
+}
+
+/* ---------- Detail pane ---------- */
+const Detail = { scale: 1, tx: 0, ty: 0, dragging: false, sx: 0, sy: 0 };
+
+function applyDetailTransform() {
+  const img = document.getElementById('detailImg');
+  img.style.transform = `translate(calc(-50% + ${Detail.tx}px), calc(-50% + ${Detail.ty}px)) scale(${Detail.scale})`;
+}
+function resetDetailTransform() { Detail.scale = 1; Detail.tx = 0; Detail.ty = 0; applyDetailTransform(); }
+
+function openDetail(photo) {
+  const idx = State.detailList.indexOf(photo);
+  State.detailIndex = idx;
+  showDetailAt(idx);
+}
+function showDetailAt(idx) {
+  if (idx < 0 || idx >= State.detailList.length) return;
+  State.detailIndex = idx;
+  const photo = State.detailList[idx];
+  const pane = document.getElementById('detailPane');
+  const wasHidden = pane.classList.contains('hidden');
+  pane.classList.remove('hidden'); pane.classList.add('flex');
+  showSplitter(true);
+  if (wasHidden) doMapResize(); // map area shrank — let the map recalc its size
+  const img = document.getElementById('detailImg');
+  // Create the full-resolution object URL only while this photo is shown, and
+  // revoke it when navigating away — avoids holding N decoded images in memory.
+  // HEIC is converted on demand so it renders in the viewer too.
+  releaseDetailUrl();
+  const token = ++State._detailToken;
+  displayBlob(photo).then(blob => {
+    if (token !== State._detailToken) return; // user already navigated away
+    State.detailUrl = URL.createObjectURL(blob);
+    img.src = State.detailUrl;
+    img.onload = () => { fitDetailImage(); };
+  });
+  document.getElementById('detailTitle').textContent = photo.fileName;
+  renderDetailMeta(photo);
+  resetDetailTransform();
+  // Highlight the selected photo's pin on the map.
+  const newSel = photo.hasGps ? photo.id : null;
+  if (newSel !== State.selectedId) { State.selectedId = newSel; renderMarkers(); }
+  // Auto-fill place name on demand (cached, single request).
+  if (photo.hasGps && !photo.placeName) {
+    reverseGeocode(photo.correctedGps.lat, photo.correctedGps.lng).then(name => {
+      if (name) { photo.placeName = name; if (State.detailIndex === idx) renderDetailMeta(photo); }
+    });
+  }
+}
+function fitDetailImage() {
+  const vp = document.getElementById('detailViewport');
+  const img = document.getElementById('detailImg');
+  const vw = vp.clientWidth, vh = vp.clientHeight;
+  const iw = img.naturalWidth || 1, ih = img.naturalHeight || 1;
+  const scale = Math.min(vw / iw, vh / ih);
+  img.style.width = (iw * scale) + 'px';
+  img.style.height = (ih * scale) + 'px';
+  resetDetailTransform();
+}
+function renderDetailMeta(photo) {
+  const el = document.getElementById('detailMeta');
+  const t = new Date(photo.timestamp);
+  const pad = n => String(n).padStart(2, '0');
+  const tStr = `${t.getFullYear()}-${pad(t.getMonth()+1)}-${pad(t.getDate())} ${pad(t.getHours())}:${pad(t.getMinutes())}:${pad(t.getSeconds())}`;
+  let html = `<div><span class="text-slate-400">시간</span> ${tStr}</div>`;
+  if (photo.hasGps) {
+    html += `<div><span class="text-slate-400">좌표</span> ${photo.correctedGps.lat.toFixed(6)}, ${photo.correctedGps.lng.toFixed(6)}</div>`;
+    if (photo.placeName) html += `<div><span class="text-slate-400">지명</span> ${photo.placeName}</div>`;
+    const badges = [];
+    if (photo.isOutlier) badges.push('<span class="badge bg-amber-100 text-amber-700">⚠ 이상치 보정됨</span>');
+    if (photo.fromTrack) badges.push('<span class="badge bg-sky-100 text-sky-700">🛰 트랙 태깅</span>');
+    if (badges.length) html += `<div class="mt-1">${badges.join(' ')}</div>`;
+    if (photo.isOutlier && photo.originalGps) html += `<div class="text-slate-400">원본 ${photo.originalGps.lat.toFixed(6)}, ${photo.originalGps.lng.toFixed(6)}</div>`;
+  } else {
+    html += `<div><span class="badge bg-slate-200 text-slate-500">GPS 없음</span></div>`;
+  }
+  if (photo.direction != null) {
+    html += `<div><span class="text-slate-400">방위각</span> ${(+photo.direction).toFixed(0)}° (${compass8(photo.direction)})</div>`;
+  }
+  const e = photo.exif || {};
+  const ex = [];
+  if (e.make || e.model) ex.push(`<div><span class="text-slate-400">기기</span> ${[e.make, e.model].filter(Boolean).join(' ')}</div>`);
+  if (e.focalLength != null) ex.push(`<div><span class="text-slate-400">초점거리</span> ${(+e.focalLength).toFixed(0)}mm</div>`);
+  if (e.fNumber != null) ex.push(`<div><span class="text-slate-400">조리개</span> f/${(+e.fNumber).toFixed(1)}</div>`);
+  if (e.iso != null) ex.push(`<div><span class="text-slate-400">ISO</span> ${Array.isArray(e.iso) ? e.iso[0] : e.iso}</div>`);
+  if (e.altitude != null) ex.push(`<div><span class="text-slate-400">고도</span> ${(+e.altitude).toFixed(1)}m</div>`);
+  if (ex.length) html += `<div class="mt-1 pt-1 border-t border-slate-100 grid grid-cols-2 gap-x-3 gap-y-0.5">${ex.join('')}</div>`;
+  html += `<div class="text-slate-400 pt-1">${State.detailIndex + 1} / ${State.detailList.length}</div>`;
+  el.innerHTML = html;
+}
+function compass8(deg) {
+  const dirs = ['북', '북동', '동', '남동', '남', '남서', '서', '북서'];
+  return dirs[Math.round(((deg % 360) + 360) % 360 / 45) % 8];
+}
+function closeDetail() {
+  const pane = document.getElementById('detailPane');
+  pane.classList.add('hidden'); pane.classList.remove('flex');
+  showSplitter(false);
+  releaseDetailUrl();
+  const img = document.getElementById('detailImg');
+  if (img) img.removeAttribute('src');
+  State.detailIndex = -1;
+  if (State.selectedId !== null) { State.selectedId = null; renderMarkers(); }
+  doMapResize(); // map reclaimed the space
+}
+function releaseDetailUrl() {
+  if (State.detailUrl) { URL.revokeObjectURL(State.detailUrl); State.detailUrl = null; }
+}
+function navDetail(delta) {
+  let i = State.detailIndex + delta;
+  if (i < 0) i = State.detailList.length - 1;
+  if (i >= State.detailList.length) i = 0;
+  showDetailAt(i);
+  const p = State.detailList[i];
+  if (p && p.hasGps && adapter().ready) adapter().panTo(p.correctedGps);
+}
+
+/* ---------- Compare mode (two photos side by side) ---------- */
+function isPicked(photo) {
+  return photo.id === State.selectedId || State.compareSet.some(p => p.id === photo.id);
+}
+function onPinClick(photo) {
+  if (State.compareMode) toggleCompare(photo);
+  else openDetail(photo);
+}
+function toggleCompareMode() {
+  State.compareMode = !State.compareMode;
+  $('compareState').textContent = State.compareMode ? 'ON' : 'OFF';
+  $('compareState').className = 'font-semibold ' + (State.compareMode ? 'text-blue-600' : 'text-slate-400');
+  if (!State.compareMode) clearCompare();
+  else { closeDetail(); renderCompareTray(); }
+}
+function toggleCompare(photo) {
+  const i = State.compareSet.findIndex(p => p.id === photo.id);
+  if (i >= 0) State.compareSet.splice(i, 1);
+  else { State.compareSet.push(photo); if (State.compareSet.length > 2) State.compareSet.shift(); }
+  renderCompareTray();
+  renderMarkers();
+}
+function clearCompare() {
+  State.compareSet = [];
+  renderCompareTray();
+  renderMarkers();
+}
+function renderCompareTray() {
+  const tray = $('compareTray');
+  if (!State.compareMode) { tray.classList.add('hidden'); tray.classList.remove('flex'); return; }
+  tray.classList.remove('hidden'); tray.classList.add('flex');
+  $('compareThumbs').innerHTML = State.compareSet.map(p =>
+    `<img class="compare-thumb" src="${p.pin ? p.pin.url : ''}" title="${p.fileName}">`).join('') ||
+    '<span class="text-xs text-slate-400">지도에서 사진 2장을 선택하세요</span>';
+  $('compareOpen').disabled = State.compareSet.length < 2;
+}
+function releaseCompareUrls() {
+  State.compareUrls.forEach((u, i) => { if (u) { URL.revokeObjectURL(u); State.compareUrls[i] = null; } });
+}
+function openCompare() {
+  if (State.compareSet.length < 2) return;
+  const modal = $('compareModal');
+  modal.classList.remove('hidden'); modal.classList.add('flex');
+  releaseCompareUrls();
+  State.compareSet.slice(0, 2).forEach((photo, side) => fillComparePanel(side, photo));
+}
+function closeCompare() {
+  const modal = $('compareModal');
+  modal.classList.add('hidden'); modal.classList.remove('flex');
+  releaseCompareUrls();
+}
+function fillComparePanel(side, photo) {
+  const panel = document.querySelector(`.cmp-panel[data-side="${side}"]`);
+  const url = URL.createObjectURL(photo._file);
+  State.compareUrls[side] = url;
+  panel.innerHTML =
+    `<div class="cmp-vp"><img alt=""></div>` +
+    `<div class="cmp-meta">${compareMetaHTML(photo)}</div>`;
+  const vp = panel.querySelector('.cmp-vp');
+  const img = panel.querySelector('img');
+  img.src = url;
+  img.onload = () => fitContain(vp, img);
+  attachSimpleViewer(vp, img);
+}
+function fitContain(vp, img) {
+  const vw = vp.clientWidth, vh = vp.clientHeight;
+  const iw = img.naturalWidth || 1, ih = img.naturalHeight || 1;
+  const s = Math.min(vw / iw, vh / ih);
+  img.style.width = (iw * s) + 'px'; img.style.height = (ih * s) + 'px';
+  img.style.transform = 'translate(-50%, -50%) scale(1)';
+  img._v = { scale: 1, tx: 0, ty: 0 };
+}
+function applyV(img) { const v = img._v; img.style.transform = `translate(calc(-50% + ${v.tx}px), calc(-50% + ${v.ty}px)) scale(${v.scale})`; }
+function attachSimpleViewer(vp, img) {
+  img._v = { scale: 1, tx: 0, ty: 0 };
+  vp.addEventListener('wheel', e => {
+    e.preventDefault();
+    const rect = vp.getBoundingClientRect();
+    const cx = e.clientX - rect.left - rect.width / 2, cy = e.clientY - rect.top - rect.height / 2;
+    const v = img._v, old = v.scale, next = Math.min(8, Math.max(1, old * (e.deltaY < 0 ? 1.12 : 0.89)));
+    if (next === old) return;
+    v.tx = cx - (cx - v.tx) * (next / old); v.ty = cy - (cy - v.ty) * (next / old); v.scale = next;
+    if (next === 1) { v.tx = 0; v.ty = 0; }
+    applyV(img);
+  }, { passive: false });
+  let drag = false, sx = 0, sy = 0;
+  vp.addEventListener('mousedown', e => { if (img._v.scale <= 1) return; drag = true; sx = e.clientX - img._v.tx; sy = e.clientY - img._v.ty; });
+  window.addEventListener('mousemove', e => { if (!drag) return; img._v.tx = e.clientX - sx; img._v.ty = e.clientY - sy; applyV(img); });
+  window.addEventListener('mouseup', () => { drag = false; });
+  attachTouchZoom(vp, img, () => img._v, applyV);
+}
+function compareMetaHTML(photo) {
+  const t = new Date(photo.timestamp); const p = n => String(n).padStart(2, '0');
+  const ts = `${t.getFullYear()}-${p(t.getMonth() + 1)}-${p(t.getDate())} ${p(t.getHours())}:${p(t.getMinutes())}:${p(t.getSeconds())}`;
+  let h = `<div class="font-semibold text-white truncate">${photo.fileName}</div>`;
+  h += `<div><span class="k">시간</span> ${ts}</div>`;
+  if (photo.hasGps) h += `<div><span class="k">좌표</span> ${photo.correctedGps.lat.toFixed(6)}, ${photo.correctedGps.lng.toFixed(6)}${photo.isOutlier ? ' ⚠' : ''}</div>`;
+  if (photo.direction != null) h += `<div><span class="k">방위각</span> ${Math.round(photo.direction)}° (${compass8(photo.direction)})</div>`;
+  const e = photo.exif || {};
+  const bits = [];
+  if (e.model) bits.push((e.make ? e.make + ' ' : '') + e.model);
+  if (e.focalLength != null) bits.push((+e.focalLength).toFixed(0) + 'mm');
+  if (e.fNumber != null) bits.push('f/' + (+e.fNumber).toFixed(1));
+  if (e.iso != null) bits.push('ISO ' + (Array.isArray(e.iso) ? e.iso[0] : e.iso));
+  if (e.altitude != null) bits.push((+e.altitude).toFixed(0) + 'm');
+  if (bits.length) h += `<div class="k">${bits.join(' · ')}</div>`;
+  return h;
+}
+
+/* ---------- Touch gestures: pinch-zoom, drag-pan, swipe ---------- */
+// Generic touch handler. getV()/apply(img) read & write a {scale,tx,ty} viewer
+// state; opts.onSwipe(dir) fires on a horizontal swipe while not zoomed.
+function attachTouchZoom(vp, img, getV, apply, opts) {
+  opts = opts || {};
+  let mode = 0, startDist = 0, startScale = 1, panSX = 0, panSY = 0, swipeSX = 0, swipeSY = 0;
+  const dist = t => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+  vp.addEventListener('touchstart', e => {
+    const v = getV();
+    if (e.touches.length === 2) { mode = 2; startDist = dist(e.touches); startScale = v.scale; }
+    else if (e.touches.length === 1) {
+      mode = 1; const t = e.touches[0];
+      panSX = t.clientX - v.tx; panSY = t.clientY - v.ty; swipeSX = t.clientX; swipeSY = t.clientY;
+    }
+  }, { passive: true });
+  vp.addEventListener('touchmove', e => {
+    const v = getV();
+    if (mode === 2 && e.touches.length === 2) {
+      e.preventDefault();
+      v.scale = Math.min(8, Math.max(1, startScale * (dist(e.touches) / (startDist || 1))));
+      if (v.scale === 1) { v.tx = 0; v.ty = 0; }
+      apply(img);
+    } else if (mode === 1 && e.touches.length === 1 && v.scale > 1) {
+      e.preventDefault();
+      const t = e.touches[0];
+      v.tx = t.clientX - panSX; v.ty = t.clientY - panSY; apply(img);
+    }
+  }, { passive: false });
+  vp.addEventListener('touchend', e => {
+    const v = getV();
+    if (mode === 1 && v.scale <= 1 && opts.onSwipe && e.changedTouches.length) {
+      const t = e.changedTouches[0], dx = t.clientX - swipeSX, dy = t.clientY - swipeSY;
+      if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) opts.onSwipe(dx < 0 ? 1 : -1);
+    }
+    mode = 0;
+  }, { passive: true });
+}
+
+/* ---------- Network status + Service Worker (PWA offline) ---------- */
+function updateNetBadge() {
+  const b = $('netBadge'); if (!b) return;
+  if (navigator.onLine) { b.textContent = '● 온라인'; b.className = 'ml-auto inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-emerald-100 text-emerald-700'; }
+  else { b.textContent = '● 오프라인'; b.className = 'ml-auto inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-amber-100 text-amber-700'; }
+}
+function registerServiceWorker() {
+  if (!('serviceWorker' in navigator)) return;
+  // Only registrable over http(s)/localhost; on file:// this no-ops quietly.
+  if (location.protocol !== 'http:' && location.protocol !== 'https:') return;
+  navigator.serviceWorker.register('sw.js').catch(err => console.warn('Service worker registration failed', err));
+}
+
+/* ---------- UI helpers ---------- */
+function showLoading(on, text) {
+  const el = document.getElementById('loading');
+  el.classList.toggle('hidden', !on);
+  el.classList.toggle('flex', on);
+  if (text) setLoadingText(text);
+}
+function setLoadingText(t) { document.getElementById('loadingText').textContent = t; }
+function setOverlay(msg) {
+  document.getElementById('overlay').style.display = 'flex';
+  document.getElementById('overlayMsg').textContent = msg;
+}
+function hideOverlay() { document.getElementById('overlay').style.display = 'none'; }
+
+function updateStatus(correctedCount, extra) {
+  const s = document.getElementById('status');
+  const parts = [];
+  parts.push(`총 ${State.photos.length}장`);
+  parts.push(`GPS ${State.geo.length}`);
+  if (State.noGpsCount) parts.push(`GPS없음 ${State.noGpsCount}`);
+  const oc = (correctedCount != null) ? correctedCount : State.geo.filter(p => p.isOutlier).length;
+  if (oc) parts.push(`보정 ${oc}`);
+  if (State.clusters.length > 1) parts.push(`군집 ${State.clusters.length}`);
+  if (extra) parts.push(extra.useThumbs ? '썸네일' : (State.simplifiedMode === 'heat' ? '점구름' : '점'));
+  if (extra && extra.tooMany && State.thumbnailsOn) parts.push(`(${PERF_CAP}장 초과→단순화)`);
+  s.innerHTML = parts.join(' · ');
+}
+
+/* ---------- Clusters & view navigation ---------- */
+// Group geo photos into geographically separated clusters using a single-pass
+// proximity grouping. The gap threshold adapts to the overall spread, so a
+// country-wide set clusters by city while a city-wide set clusters by district.
+function computeClusters() {
+  const pts = State.geo;
+  State.clusters = [];
+  State.clusterIndex = -1;
+  if (!pts.length) return;
+  let minLat = 90, maxLat = -90, minLng = 180, maxLng = -180;
+  pts.forEach(p => { const c = p.correctedGps; minLat = Math.min(minLat, c.lat); maxLat = Math.max(maxLat, c.lat); minLng = Math.min(minLng, c.lng); maxLng = Math.max(maxLng, c.lng); });
+  const diagKm = haversine({ lat: minLat, lng: minLng }, { lat: maxLat, lng: maxLng }) / 1000;
+  // Cluster only genuinely separated groups: a 2 km floor keeps a single
+  // neighborhood/visit as one cluster, while the diagonal fraction scales up so
+  // city-to-city or region-to-region gaps split into distinct clusters.
+  const thr = Math.max(2, diagKm * 0.1);
+  const clusters = [];
+  for (const p of pts) {
+    let best = null, bd = Infinity;
+    for (const c of clusters) { const d = haversine(p.correctedGps, c.center) / 1000; if (d < thr && d < bd) { bd = d; best = c; } }
+    if (best) {
+      best.items.push(p);
+      const n = best.items.length;
+      best.center = { lat: best.center.lat + (p.correctedGps.lat - best.center.lat) / n, lng: best.center.lng + (p.correctedGps.lng - best.center.lng) / n };
+      best.firstTs = Math.min(best.firstTs, p.timestamp);
+    } else {
+      clusters.push({ items: [p], center: { ...p.correctedGps }, firstTs: p.timestamp });
+    }
+  }
+  clusters.sort((a, b) => a.firstTs - b.firstTs);
+  State.clusters = clusters;
+}
+
+function populateClusterNav() {
+  const sel = $('clusterSelect');
+  const cs = State.clusters;
+  sel.innerHTML = `<option value="all">전체 (${State.geo.length}장)</option>` +
+    cs.map((c, i) => `<option value="${i}">군집 ${i + 1} (${c.items.length}장)</option>`).join('');
+  sel.value = 'all';
+  const nav = $('clusterNav');
+  if (State.geo.length) { nav.classList.remove('hidden'); nav.classList.add('inline-flex'); }
+  else { nav.classList.add('hidden'); nav.classList.remove('inline-flex'); }
+  const multi = cs.length > 1;
+  $('clusterPrev').disabled = !multi;
+  $('clusterNext').disabled = !multi;
+  $('clusterSelect').disabled = !cs.length;
+}
+
+function fitAll() {
+  State.clusterIndex = -1;
+  $('clusterSelect').value = 'all';
+  if (State.geo.length) adapter().fitTo(dataCoords());
+}
+function fitCluster(i) {
+  if (i < 0 || i >= State.clusters.length) return;
+  State.clusterIndex = i;
+  $('clusterSelect').value = String(i);
+  adapter().fitTo(State.clusters[i].items.map(p => p.correctedGps));
+}
+function cycleCluster(delta) {
+  if (!State.clusters.length) return;
+  let i = State.clusterIndex < 0 ? (delta > 0 ? 0 : State.clusters.length - 1) : State.clusterIndex + delta;
+  if (i < 0) i = State.clusters.length - 1;
+  if (i >= State.clusters.length) i = 0;
+  fitCluster(i);
+}
+
+/* ---------- Time filter ---------- */
+function visibleGeo() {
+  if (State.timeFrom == null || State.timeTo == null) return State.geo;
+  return State.geo.filter(p => p.timestamp >= State.timeFrom && p.timestamp <= State.timeTo);
+}
+function fmtDateTime(ms) {
+  const t = new Date(ms); const p = n => String(n).padStart(2, '0');
+  return `${t.getFullYear()}-${p(t.getMonth() + 1)}-${p(t.getDate())} ${p(t.getHours())}:${p(t.getMinutes())}`;
+}
+function sliderToTs(v) { return State._tmin + (v / 1000) * (State._tmax - State._tmin); }
+function setupTimeSlider() {
+  const bar = $('timeBar');
+  let tmin = Infinity, tmax = -Infinity;
+  for (const p of State.geo) { if (p.timestamp < tmin) tmin = p.timestamp; if (p.timestamp > tmax) tmax = p.timestamp; }
+  // Hide the slider when there's nothing to filter (no photos or a single instant).
+  if (!State.geo.length || tmin === tmax) {
+    bar.classList.add('hidden'); bar.classList.remove('flex');
+    State.timeFrom = null; State.timeTo = null;
+    return;
+  }
+  State._tmin = tmin; State._tmax = tmax;
+  State.timeFrom = tmin; State.timeTo = tmax;
+  $('timeFrom').value = 0; $('timeTo').value = 1000;
+  bar.classList.remove('hidden'); bar.classList.add('flex');
+  updateTimeLabels();
+}
+function onTimeSlider() {
+  const a = +$('timeFrom').value, b = +$('timeTo').value;
+  State.timeFrom = sliderToTs(Math.min(a, b));
+  State.timeTo = sliderToTs(Math.max(a, b));
+  updateTimeLabels();
+  renderAll();
+}
+function updateTimeLabels() {
+  $('timeFromLabel').textContent = fmtDateTime(State.timeFrom);
+  $('timeToLabel').textContent = fmtDateTime(State.timeTo);
+  const a = +$('timeFrom').value, b = +$('timeTo').value;
+  const lo = Math.min(a, b), hi = Math.max(a, b);
+  const range = $('timeRange');
+  range.style.setProperty('--from', (lo / 10) + '%');
+  range.style.setProperty('--to', (hi / 10) + '%');
+  $('timeFrom').style.zIndex = a > b ? '5' : '3';
+  $('timeTo').style.zIndex = a > b ? '3' : '5';
+  $('timeCount').textContent = `${visibleGeo().length} / ${State.geo.length}장`;
+}
+function resetTimeFilter() {
+  State.timeFrom = State._tmin; State.timeTo = State._tmax;
+  $('timeFrom').value = 0; $('timeTo').value = 1000;
+  updateTimeLabels(); renderAll();
+}
+
+/* ---------- Cadastral (지적편집도) overlay ---------- */
+function cadastralSupported() { return State.provider === 'naver' || State.provider === 'kakao'; }
+function updateCadastralButton() {
+  const btn = $('cadastralBtn'), st = $('cadastralState');
+  const ok = cadastralSupported();
+  btn.disabled = !ok;
+  st.textContent = (ok && State.cadastral) ? 'ON' : 'OFF';
+  st.className = 'font-semibold ' + (ok && State.cadastral ? 'text-blue-600' : 'text-slate-400');
+}
+function toggleCadastral() {
+  if (!cadastralSupported()) return;
+  State.cadastral = !State.cadastral;
+  const a = adapter();
+  if (a.ready && a.setCadastral) a.setCadastral(State.cadastral);
+  updateCadastralButton();
+}
+
+/* ---------- Export (GeoJSON / KML / CSV) ---------- */
+function exVal(p, k) { return (p.exif && p.exif[k] != null) ? p.exif[k] : ''; }
+function download(name, mime, text) {
+  const blob = new Blob([text], { type: mime });
+  downloadBlob(name, blob);
+}
+function downloadBlob(name, blob) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+}
+
+/* =========================================================================
+   GPX track-log geotagging (assign coordinates to photos by capture time)
+   ========================================================================= */
+function parseGPX(text) {
+  const doc = new DOMParser().parseFromString(text, 'application/xml');
+  if (doc.querySelector('parsererror')) return [];
+  const pts = [];
+  doc.querySelectorAll('trkpt, rtept, wpt').forEach(el => {
+    const lat = parseFloat(el.getAttribute('lat'));
+    const lng = parseFloat(el.getAttribute('lon'));
+    const timeEl = el.querySelector('time');
+    const eleEl = el.querySelector('ele');
+    if (!isFinite(lat) || !isFinite(lng) || !timeEl) return;
+    const t = Date.parse((timeEl.textContent || '').trim());
+    if (!isFinite(t)) return;
+    pts.push({ t, lat, lng, ele: eleEl ? parseFloat(eleEl.textContent) : null });
+  });
+  pts.sort((a, b) => a.t - b.t);
+  return pts;
+}
+function interpTrack(t) {
+  const tr = State.track;
+  if (!tr.length) return null;
+  if (t <= tr[0].t) return { ...tr[0] };
+  if (t >= tr[tr.length - 1].t) return { ...tr[tr.length - 1] };
+  let lo = 0, hi = tr.length - 1;
+  while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (tr[mid].t <= t) lo = mid; else hi = mid; }
+  const a = tr[lo], b = tr[hi];
+  const f = (t - a.t) / ((b.t - a.t) || 1);
+  const ele = (a.ele != null && b.ele != null) ? a.ele + (b.ele - a.ele) * f : (a.ele != null ? a.ele : b.ele);
+  return { lat: a.lat + (b.lat - a.lat) * f, lng: a.lng + (b.lng - a.lng) * f, ele };
+}
+function geotagFromTrack(offsetMs, toleranceMs, scope) {
+  const tr = State.track;
+  if (!tr.length) return 0;
+  const t0 = tr[0].t, t1 = tr[tr.length - 1].t;
+  let tagged = 0;
+  for (const p of State.photos) {
+    if (scope === 'missing' && p.hasGps) continue;
+    const pt = p.timestamp + offsetMs;
+    if (pt < t0 - toleranceMs || pt > t1 + toleranceMs) continue;
+    const pos = interpTrack(pt);
+    if (!pos) continue;
+    p.originalGps = { lat: pos.lat, lng: pos.lng };
+    p.correctedGps = { lat: pos.lat, lng: pos.lng };
+    p.hasGps = true;
+    p.fromTrack = true;
+    p.placeName = null;
+    if (pos.ele != null) { p.exif = p.exif || {}; if (p.exif.altitude == null) p.exif.altitude = pos.ele; }
+    tagged++;
+  }
+  return tagged;
+}
+// Rebuild derived data after the geo set changes (used after track tagging).
+async function rebuildGeo() {
+  State.detailList = State.photos.slice().sort((a, b) => a.timestamp - b.timestamp);
+  State.geo = State.photos.filter(p => p.hasGps).sort((a, b) => a.timestamp - b.timestamp);
+  processOutliers(State.geo);
+  let g = 0;
+  for (const p of State.geo) {
+    if (!p.pin) { p.pin = await makePin(await displayBlob(p), Settings.thumbSize, p.isOutlier, p.direction); }
+    g++;
+    if (g % 4 === 0) { setLoadingText(`썸네일 생성 중… ${g} / ${State.geo.length}`); await new Promise(r => setTimeout(r, 0)); }
+  }
+  computeClusters(); populateClusterNav(); setupTimeSlider();
+}
+
+/* =========================================================================
+   Minimal ZIP writer (store/no-compression) for sidecar/JPEG bundles
+   ========================================================================= */
+let _crcTable = null;
+function crcTable() {
+  if (_crcTable) return _crcTable;
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1); t[n] = c >>> 0; }
+  return (_crcTable = t);
+}
+function crc32(buf) { const t = crcTable(); let c = 0xFFFFFFFF; for (let i = 0; i < buf.length; i++) c = t[(c ^ buf[i]) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
+function zipStore(entries) {
+  const enc = new TextEncoder();
+  const u16 = n => [n & 255, (n >> 8) & 255];
+  const u32 = n => [n & 255, (n >> 8) & 255, (n >> 16) & 255, (n >> 24) & 255];
+  const parts = [], central = []; let offset = 0;
+  for (const e of entries) {
+    const nameB = enc.encode(e.name);
+    const data = e.data;
+    const crc = crc32(data);
+    const lh = new Uint8Array([].concat(u32(0x04034b50), u16(20), u16(0), u16(0), u16(0), u16(0), u32(crc), u32(data.length), u32(data.length), u16(nameB.length), u16(0)));
+    parts.push(lh, nameB, data);
+    const ch = new Uint8Array([].concat(u32(0x02014b50), u16(20), u16(20), u16(0), u16(0), u16(0), u16(0), u32(crc), u32(data.length), u32(data.length), u16(nameB.length), u16(0), u16(0), u16(0), u16(0), u32(0), u32(offset)));
+    central.push(ch, nameB);
+    offset += lh.length + nameB.length + data.length;
+  }
+  let cenSize = 0; central.forEach(c => cenSize += c.length);
+  const end = new Uint8Array([].concat(u32(0x06054b50), u16(0), u16(0), u16(entries.length), u16(entries.length), u32(cenSize), u32(offset), u16(0)));
+  return new Blob([...parts, ...central, end], { type: 'application/zip' });
+}
+
+/* =========================================================================
+   Metadata write-back: XMP sidecars + EXIF-embedded JPEGs
+   ========================================================================= */
+function baseName(name) { const i = name.lastIndexOf('.'); return i > 0 ? name.slice(0, i) : name; }
+function gpsDM(v, ref) { v = Math.abs(v); const d = Math.floor(v); const m = (v - d) * 60; return `${d},${m.toFixed(6)}${ref}`; }
+function buildXMP(p) {
+  const lat = p.correctedGps.lat, lng = p.correctedGps.lng;
+  const alt = (p.exif && p.exif.altitude != null) ? p.exif.altitude : null;
+  const dir = p.direction, t = new Date(p.timestamp).toISOString();
+  const L = [];
+  L.push(`<exif:GPSLatitude>${gpsDM(lat, lat >= 0 ? 'N' : 'S')}</exif:GPSLatitude>`);
+  L.push(`<exif:GPSLongitude>${gpsDM(lng, lng >= 0 ? 'E' : 'W')}</exif:GPSLongitude>`);
+  if (alt != null) { L.push(`<exif:GPSAltitude>${Math.round(Math.abs(alt) * 100)}/100</exif:GPSAltitude>`); L.push(`<exif:GPSAltitudeRef>${alt < 0 ? 1 : 0}</exif:GPSAltitudeRef>`); }
+  if (dir != null) { L.push(`<exif:GPSImgDirection>${Math.round(dir * 100)}/100</exif:GPSImgDirection>`); L.push(`<exif:GPSImgDirectionRef>T</exif:GPSImgDirectionRef>`); }
+  if (p.placeName) L.push(`<photoshop:City>${String(p.placeName).replace(/[<>&]/g, '')}</photoshop:City>`);
+  return `<?xpacket begin="﻿" id="W5M0MpCehiHzreSzNTczkc9d"?>
+<x:xmpmeta xmlns:x="adobe:ns:meta/">
+ <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+  <rdf:Description rdf:about="" xmlns:exif="http://ns.adobe.com/exif/1.0/" xmlns:xmp="http://ns.adobe.com/xap/1.0/" xmlns:photoshop="http://ns.adobe.com/photoshop/1.0/">
+   ${L.join('\n   ')}
+   <xmp:CreateDate>${t}</xmp:CreateDate>
+  </rdf:Description>
+ </rdf:RDF>
+</x:xmpmeta>
+<?xpacket end="w"?>`;
+}
+function exportXMPZip(list) {
+  const enc = new TextEncoder();
+  const entries = list.map(p => ({ name: baseName(p.fileName) + '.xmp', data: enc.encode(buildXMP(p)) }));
+  downloadBlob(`geophoto-xmp-${new Date().toISOString().slice(0, 10)}.zip`, zipStore(entries));
+}
+
+function blobToDataURL(blob) { return new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = rej; fr.readAsDataURL(blob); }); }
+function dataURLToU8(dataUrl) { const b = atob(dataUrl.split(',')[1]); const u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return u; }
+function isJpeg(file) { return /jpe?g/i.test(file.type) || /\.jpe?g$/i.test(file.name); }
+async function ensurePiexif() { if (window.piexif) return true; try { await loadScript('https://cdn.jsdelivr.net/npm/piexifjs'); return !!window.piexif; } catch (e) { return false; } }
+function dmsRational(v) { v = Math.abs(v); const d = Math.floor(v); const mf = (v - d) * 60; const m = Math.floor(mf); const s = (mf - m) * 60; return [[d, 1], [m, 1], [Math.round(s * 1000), 1000]]; }
+async function buildExifJpeg(p) {
+  const dataUrl = await blobToDataURL(p._file);
+  let ex;
+  try { ex = piexif.load(dataUrl); } catch (e) { ex = { '0th': {}, 'Exif': {}, 'GPS': {} }; }
+  const gps = ex.GPS || {};
+  const lat = p.correctedGps.lat, lng = p.correctedGps.lng;
+  gps[piexif.GPSIFD.GPSLatitudeRef] = lat >= 0 ? 'N' : 'S';
+  gps[piexif.GPSIFD.GPSLatitude] = dmsRational(lat);
+  gps[piexif.GPSIFD.GPSLongitudeRef] = lng >= 0 ? 'E' : 'W';
+  gps[piexif.GPSIFD.GPSLongitude] = dmsRational(lng);
+  if (p.exif && p.exif.altitude != null) { gps[piexif.GPSIFD.GPSAltitudeRef] = p.exif.altitude < 0 ? 1 : 0; gps[piexif.GPSIFD.GPSAltitude] = [Math.round(Math.abs(p.exif.altitude) * 100), 100]; }
+  if (p.direction != null) { gps[piexif.GPSIFD.GPSImgDirectionRef] = 'T'; gps[piexif.GPSIFD.GPSImgDirection] = [Math.round(p.direction * 100), 100]; }
+  ex.GPS = gps;
+  return dataURLToU8(piexif.insert(piexif.dump(ex), dataUrl));
+}
+async function exportExifJpegZip(list) {
+  const jpegs = list.filter(p => isJpeg(p._file));
+  if (!jpegs.length) { alert('EXIF를 기록할 수 있는 JPEG 사진이 없습니다. (PNG/HEIC 등은 XMP 사이드카를 쓰세요)'); return; }
+  if (!(await ensurePiexif())) { alert('EXIF 기록 라이브러리를 불러오지 못했습니다 (네트워크 필요).'); return; }
+  showLoading(true, `EXIF 기록 중… 0 / ${jpegs.length}`);
+  const entries = [];
+  for (let i = 0; i < jpegs.length; i++) {
+    try { entries.push({ name: jpegs[i].fileName, data: await buildExifJpeg(jpegs[i]) }); }
+    catch (e) { console.warn('EXIF write failed:', jpegs[i].fileName, e); }
+    if (i % 3 === 0 || i === jpegs.length - 1) { setLoadingText(`EXIF 기록 중… ${i + 1} / ${jpegs.length}`); await new Promise(r => setTimeout(r, 0)); }
+  }
+  showLoading(false);
+  if (!entries.length) { alert('EXIF 기록에 실패했습니다.'); return; }
+  downloadBlob(`geophoto-jpeg-${new Date().toISOString().slice(0, 10)}.zip`, zipStore(entries));
+}
+
+/* =========================================================================
+   Reverse geocoding (OpenStreetMap Nominatim) — place names
+   ========================================================================= */
+function geoKey(lat, lng) { return lat.toFixed(4) + ',' + lng.toFixed(4); }
+async function reverseGeocode(lat, lng) {
+  const key = geoKey(lat, lng);
+  if (key in State.geocodeCache) return State.geocodeCache[key];
+  try {
+    const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}&accept-language=ko&zoom=16`;
+    const res = await fetch(url, { headers: { Accept: 'application/json' } });
+    if (!res.ok) throw new Error('http ' + res.status);
+    const j = await res.json();
+    const a = j.address || {};
+    const name = [a.country, a.state || a.province, a.city || a.county || a.town || a.village, a.suburb || a.neighbourhood || a.road]
+      .filter(Boolean).slice(0, 3).join(' ') || j.display_name || null;
+    State.geocodeCache[key] = name;
+    return name;
+  } catch (e) { State.geocodeCache[key] = null; return null; }
+}
+async function fillPlaceNames() {
+  const list = visibleGeo().filter(p => !p.placeName);
+  if (!list.length) { alert('지명을 채울 사진이 없습니다 (이미 채워졌거나 표시된 사진 없음).'); return; }
+  if (list.length > 50 && !confirm(`${list.length}장을 지오코딩합니다. OpenStreetMap 정책상 1초당 1건이라 약 ${list.length}초 걸립니다. 계속할까요?`)) return;
+  showLoading(true, `지명 조회 중… 0 / ${list.length}`);
+  for (let i = 0; i < list.length; i++) {
+    list[i].placeName = await reverseGeocode(list[i].correctedGps.lat, list[i].correctedGps.lng);
+    setLoadingText(`지명 조회 중… ${i + 1} / ${list.length}`);
+    if (i < list.length - 1) await new Promise(r => setTimeout(r, 1100)); // Nominatim: ≤ 1 req/sec
+  }
+  showLoading(false);
+  if (State.detailIndex >= 0) renderDetailMeta(State.detailList[State.detailIndex]);
+  alert('지명 채우기 완료.');
+}
+
+/* =========================================================================
+   HEIC decoding (lazy heic2any) so iPhone HEIC photos render
+   ========================================================================= */
+function isHeic(file) { return /heic|heif/i.test(file.type) || /\.(heic|heif)$/i.test(file.name); }
+let _heicLib = null;
+async function ensureHeic2any() {
+  if (_heicLib) return _heicLib;
+  if (window.heic2any) return (_heicLib = window.heic2any);
+  try { await loadScript('https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js'); _heicLib = window.heic2any || null; }
+  catch (e) { _heicLib = null; }
+  return _heicLib;
+}
+// Return a browser-decodable Blob for a photo (converts HEIC once, cached).
+async function displayBlob(photo) {
+  if (photo._displayBlob) return photo._displayBlob;
+  const f = photo._file;
+  if (isHeic(f)) {
+    const lib = await ensureHeic2any();
+    if (lib) {
+      try { const out = await lib({ blob: f, toType: 'image/jpeg', quality: 0.85 }); photo._displayBlob = Array.isArray(out) ? out[0] : out; }
+      catch (e) { photo._displayBlob = f; }
+    } else { photo._displayBlob = f; }
+  } else { photo._displayBlob = f; }
+  return photo._displayBlob;
+}
+function buildGeoJSON(list) {
+  const features = list.map(p => ({
+    type: 'Feature',
+    geometry: { type: 'Point', coordinates: [p.correctedGps.lng, p.correctedGps.lat] },
+    properties: {
+      fileName: p.fileName,
+      time: new Date(p.timestamp).toISOString(),
+      isOutlier: p.isOutlier,
+      originalLat: p.originalGps ? p.originalGps.lat : null,
+      originalLng: p.originalGps ? p.originalGps.lng : null,
+      direction: p.direction,
+      model: exVal(p, 'model') || null,
+      focalLength: exVal(p, 'focalLength') || null,
+      fNumber: exVal(p, 'fNumber') || null,
+      iso: exVal(p, 'iso') || null,
+      altitude: exVal(p, 'altitude') || null,
+      placeName: p.placeName || null,
+      fromTrack: !!p.fromTrack,
+    },
+  }));
+  const line = list.slice().sort((a, b) => a.timestamp - b.timestamp).map(p => [p.correctedGps.lng, p.correctedGps.lat]);
+  if (line.length > 1) features.push({ type: 'Feature', geometry: { type: 'LineString', coordinates: line }, properties: { name: '경로' } });
+  return JSON.stringify({ type: 'FeatureCollection', features }, null, 2);
+}
+function buildKML(list) {
+  const esc = s => String(s == null ? '' : s).replace(/[<>&'"]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' }[c]));
+  const marks = list.map(p =>
+    `    <Placemark>\n      <name>${esc(p.fileName)}</name>\n` +
+    `      <description>${esc(new Date(p.timestamp).toLocaleString())}${p.direction != null ? ' / 방위 ' + Math.round(p.direction) + '°' : ''}</description>\n` +
+    `      <Point><coordinates>${p.correctedGps.lng},${p.correctedGps.lat},${exVal(p, 'altitude') || 0}</coordinates></Point>\n    </Placemark>`
+  ).join('\n');
+  const sorted = list.slice().sort((a, b) => a.timestamp - b.timestamp);
+  const line = sorted.length > 1
+    ? `    <Placemark>\n      <name>경로</name>\n      <LineString><tessellate>1</tessellate><coordinates>${sorted.map(p => p.correctedGps.lng + ',' + p.correctedGps.lat + ',0').join(' ')}</coordinates></LineString>\n    </Placemark>`
+    : '';
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<kml xmlns="http://www.opengis.net/kml/2.2">\n  <Document>\n    <name>GeoPhoto Export</name>\n${marks}\n${line}\n  </Document>\n</kml>`;
+}
+function buildCSV(list) {
+  const esc = s => { s = String(s == null ? '' : s); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+  const header = ['fileName', 'time', 'lat', 'lng', 'originalLat', 'originalLng', 'isOutlier', 'fromTrack', 'direction', 'altitude', 'placeName', 'model', 'focalLength', 'fNumber', 'iso'];
+  const rows = list.map(p => [
+    p.fileName, new Date(p.timestamp).toISOString(),
+    p.correctedGps.lat, p.correctedGps.lng,
+    p.originalGps ? p.originalGps.lat : '', p.originalGps ? p.originalGps.lng : '',
+    p.isOutlier, !!p.fromTrack, p.direction == null ? '' : p.direction,
+    exVal(p, 'altitude'), p.placeName || '', exVal(p, 'model'), exVal(p, 'focalLength'), exVal(p, 'fNumber'), exVal(p, 'iso'),
+  ].map(esc).join(','));
+  return '﻿' + [header.join(','), ...rows].join('\r\n'); // BOM so Excel reads UTF-8
+}
+/* ---------- GPX track modal handlers ---------- */
+function openTrackModal() { const m = $('trackModal'); m.classList.remove('hidden'); m.classList.add('flex'); }
+function closeTrackModal() { const m = $('trackModal'); m.classList.add('hidden'); m.classList.remove('flex'); }
+async function onGpxSelected(file) {
+  const text = await file.text();
+  const pts = parseGPX(text);
+  State.track = pts;
+  const sum = $('trackSummary'), apply = $('trackApply');
+  if (!pts.length) {
+    sum.textContent = '⚠ 트랙 포인트를 읽지 못했습니다 (시간 정보가 있는 GPX가 필요합니다).';
+    sum.className = 'text-xs text-amber-600'; apply.disabled = true; return;
+  }
+  sum.innerHTML = `✅ 트랙 ${pts.length.toLocaleString()}개 · ${fmtDateTime(pts[0].t)} ~ ${fmtDateTime(pts[pts.length - 1].t)}`;
+  sum.className = 'text-xs text-emerald-600'; apply.disabled = false;
+}
+async function applyTrackTagging() {
+  if (!State.track.length) return;
+  if (!State.photos.length) { alert('먼저 사진을 불러오세요.'); return; }
+  const sign = +$('trackSign').value;
+  const h = +$('trackH').value || 0, mn = +$('trackM').value || 0, s = +$('trackS').value || 0;
+  const offsetMs = sign * ((h * 3600 + mn * 60 + s) * 1000);
+  const tolMs = Math.max(0, (+$('trackTol').value || 0)) * 60000;
+  const scope = (document.querySelector('input[name="trackScope"]:checked') || {}).value || 'missing';
+  showLoading(true, '트랙으로 좌표 부여 중…');
+  const tagged = geotagFromTrack(offsetMs, tolMs, scope);
+  await rebuildGeo();
+  showLoading(false);
+  closeTrackModal();
+  updateStatus();
+  if (State.geo.length) { hideOverlay(); await ensureMapReady(true); }
+  alert(`${tagged}장에 트랙 좌표를 부여했습니다.`);
+}
+
+function exportData(fmt) {
+  const list = visibleGeo();
+  if (!list.length) { alert('내보낼 GPS 사진이 없습니다.'); return; }
+  const stamp = new Date().toISOString().slice(0, 10);
+  if (fmt === 'geojson') download(`geophoto-${stamp}.geojson`, 'application/geo+json', buildGeoJSON(list));
+  else if (fmt === 'kml') download(`geophoto-${stamp}.kml`, 'application/vnd.google-earth.kml+xml', buildKML(list));
+  else if (fmt === 'csv') download(`geophoto-${stamp}.csv`, 'text/csv;charset=utf-8', buildCSV(list));
+  else if (fmt === 'xmp') exportXMPZip(list);
+  else if (fmt === 'exifjpeg') exportExifJpegZip(list);
+}
+
+/* ---------- Splitter (drag to resize map / detail pane) ---------- */
+let mapResizeTimer = null;
+function scheduleMapResize() { clearTimeout(mapResizeTimer); mapResizeTimer = setTimeout(doMapResize, 60); }
+function doMapResize() { const a = adapter(); if (a && a.ready && a.onContainerResize) a.onContainerResize(); }
+function showSplitter(show) { $('splitter').classList.toggle('hidden', !show); }
+function wireSplitter() {
+  const sp = $('splitter'), pane = $('detailPane');
+  let dragging = false;
+  sp.addEventListener('mousedown', e => {
+    dragging = true; sp.classList.add('dragging');
+    document.body.style.userSelect = 'none'; document.body.style.cursor = 'col-resize';
+    e.preventDefault();
+  });
+  window.addEventListener('mousemove', e => {
+    if (!dragging) return;
+    const w = Math.min(window.innerWidth * 0.8, Math.max(280, window.innerWidth - e.clientX));
+    pane.style.width = w + 'px';
+    if (State.detailIndex >= 0) fitDetailImage();
+    scheduleMapResize();
+  });
+  window.addEventListener('mouseup', () => {
+    if (!dragging) return;
+    dragging = false; sp.classList.remove('dragging');
+    document.body.style.userSelect = ''; document.body.style.cursor = '';
+    doMapResize();
+  });
+}
+
+/* =========================================================================
+   Event wiring
+   ========================================================================= */
+function $(id) { return document.getElementById(id); }
+
+function init() {
+  loadSettings();
+  initExifWorker();
+  State.provider = 'osm';
+  $('providerSelect').value = State.provider;
+  $('mapTypeSelect').value = State.mapType;
+  updateCadastralButton();
+
+  $('folderInput').addEventListener('change', e => { if (e.target.files.length) loadFiles(e.target.files); });
+  $('filesInput').addEventListener('change', e => { if (e.target.files.length) loadFiles(e.target.files); });
+
+  $('providerSelect').addEventListener('change', async e => {
+    const prev = State.provider;
+    State.provider = e.target.value;
+    if (prev !== State.provider && Adapters[prev] && Adapters[prev].reset) Adapters[prev].reset();
+    await ensureMapReady(true);
+  });
+
+  $('mapTypeSelect').addEventListener('change', e => {
+    State.mapType = e.target.value;
+    const a = adapter();
+    if (a.ready && a.setMapType) a.setMapType(State.mapType);
+  });
+
+  $('cadastralBtn').addEventListener('click', toggleCadastral);
+
+  $('exportSelect').addEventListener('change', e => {
+    const fmt = e.target.value;
+    e.target.value = '';
+    if (fmt) exportData(fmt);
+  });
+
+  // Time filter slider
+  $('timeFrom').addEventListener('input', onTimeSlider);
+  $('timeTo').addEventListener('input', onTimeSlider);
+  $('timeReset').addEventListener('click', resetTimeFilter);
+
+  // Compare mode
+  $('compareBtn').addEventListener('click', toggleCompareMode);
+  $('compareOpen').addEventListener('click', openCompare);
+  $('compareClear').addEventListener('click', clearCompare);
+  $('compareModalClose').addEventListener('click', closeCompare);
+  $('compareModal').addEventListener('click', e => { if (e.target.id === 'compareModal') closeCompare(); });
+
+  // GPX track geotagging
+  $('trackBtn').addEventListener('click', openTrackModal);
+  $('trackClose').addEventListener('click', closeTrackModal);
+  $('trackModal').addEventListener('click', e => { if (e.target.id === 'trackModal') closeTrackModal(); });
+  $('gpxPick').addEventListener('click', () => $('gpxInput').click());
+  $('gpxInput').addEventListener('change', e => { if (e.target.files[0]) onGpxSelected(e.target.files[0]); });
+  $('trackApply').addEventListener('click', applyTrackTagging);
+
+  // Reverse geocoding (place names)
+  $('geocodeBtn').addEventListener('click', fillPlaceNames);
+
+  // PWA: network status + service worker
+  updateNetBadge();
+  window.addEventListener('online', updateNetBadge);
+  window.addEventListener('offline', updateNetBadge);
+  registerServiceWorker();
+
+  $('thumbToggle').addEventListener('click', () => {
+    State.thumbnailsOn = !State.thumbnailsOn;
+    $('thumbState').textContent = State.thumbnailsOn ? 'ON' : 'OFF';
+    $('thumbState').className = 'font-semibold ' + (State.thumbnailsOn ? 'text-blue-600' : 'text-slate-400');
+    renderMarkers();
+  });
+  $('modeSelect').addEventListener('change', e => { State.simplifiedMode = e.target.value; renderMarkers(); });
+  $('pathSelect').addEventListener('change', e => { State.pathMode = e.target.value; renderPaths(); });
+
+  // Cluster navigation / fit extent
+  $('fitAllBtn').addEventListener('click', fitAll);
+  $('clusterPrev').addEventListener('click', () => cycleCluster(-1));
+  $('clusterNext').addEventListener('click', () => cycleCluster(1));
+  $('clusterSelect').addEventListener('change', e => {
+    if (e.target.value === 'all') fitAll();
+    else fitCluster(parseInt(e.target.value, 10));
+  });
+
+  // Resizable map / detail-pane splitter
+  wireSplitter();
+  populateClusterNav();
+
+  // Settings modal
+  $('settingsBtn').addEventListener('click', openSettings);
+  $('settingsClose').addEventListener('click', closeSettings);
+  $('settingsSave').addEventListener('click', saveFromSettings);
+  $('settingsModal').addEventListener('click', e => { if (e.target.id === 'settingsModal') closeSettings(); });
+
+  // Detail controls
+  $('detailClose').addEventListener('click', closeDetail);
+  document.querySelectorAll('.dctl').forEach(b => b.addEventListener('click', () => handleDetailAct(b.dataset.act)));
+  wireDetailGestures();
+
+  // Keyboard
+  document.addEventListener('keydown', e => {
+    if (State.detailIndex < 0) return;
+    if (e.key === 'ArrowLeft') navDetail(-1);
+    else if (e.key === 'ArrowRight') navDetail(1);
+    else if (e.key === 'Escape') { if (!document.fullscreenElement) closeDetail(); }
+  });
+
+  window.addEventListener('resize', () => {
+    if (State.detailIndex >= 0) fitDetailImage();
+    if (!$('compareModal').classList.contains('hidden')) {
+      document.querySelectorAll('.cmp-panel .cmp-vp').forEach(vp => { const img = vp.querySelector('img'); if (img) fitContain(vp, img); });
+    }
+  });
+
+  // Show the keyless OpenStreetMap immediately so there's a live map before any
+  // photos are loaded. The empty-state hint stays visible until a folder is chosen.
+  ensureMapReady(false);
+}
+
+function handleDetailAct(act) {
+  if (act === 'prev') navDetail(-1);
+  else if (act === 'next') navDetail(1);
+  else if (act === 'zoomin') zoomDetail(1.25);
+  else if (act === 'zoomout') zoomDetail(0.8);
+  else if (act === 'reset') resetDetailTransform();
+  else if (act === 'full') toggleFullscreen();
+}
+function zoomDetail(factor) {
+  Detail.scale = Math.min(8, Math.max(1, Detail.scale * factor));
+  if (Detail.scale === 1) { Detail.tx = 0; Detail.ty = 0; }
+  applyDetailTransform();
+}
+function toggleFullscreen() {
+  const pane = $('detailPane');
+  if (!document.fullscreenElement) { (pane.requestFullscreen || pane.webkitRequestFullscreen).call(pane); }
+  else { document.exitFullscreen(); }
+}
+function wireDetailGestures() {
+  const vp = $('detailViewport');
+  vp.addEventListener('wheel', e => {
+    e.preventDefault();
+    const rect = vp.getBoundingClientRect();
+    const cx = e.clientX - rect.left - rect.width / 2;
+    const cy = e.clientY - rect.top - rect.height / 2;
+    const old = Detail.scale;
+    const factor = e.deltaY < 0 ? 1.12 : 0.89;
+    const next = Math.min(8, Math.max(1, old * factor));
+    if (next === old) return;
+    // keep cursor point stable
+    Detail.tx = cx - (cx - Detail.tx) * (next / old);
+    Detail.ty = cy - (cy - Detail.ty) * (next / old);
+    Detail.scale = next;
+    if (next === 1) { Detail.tx = 0; Detail.ty = 0; }
+    applyDetailTransform();
+  }, { passive: false });
+
+  vp.addEventListener('mousedown', e => {
+    if (Detail.scale <= 1) return;
+    Detail.dragging = true; Detail.sx = e.clientX - Detail.tx; Detail.sy = e.clientY - Detail.ty;
+    vp.classList.add('grabbing');
+  });
+  window.addEventListener('mousemove', e => {
+    if (!Detail.dragging) return;
+    Detail.tx = e.clientX - Detail.sx; Detail.ty = e.clientY - Detail.sy;
+    applyDetailTransform();
+  });
+  window.addEventListener('mouseup', () => { Detail.dragging = false; vp.classList.remove('grabbing'); });
+  document.addEventListener('fullscreenchange', () => { if (State.detailIndex >= 0) setTimeout(fitDetailImage, 60); });
+
+  // Mobile: pinch-to-zoom, drag-to-pan, and swipe left/right to navigate photos.
+  attachTouchZoom(vp, document.getElementById('detailImg'), () => Detail, () => applyDetailTransform(), { onSwipe: navDetail });
+}
+
+/* ---------- Settings modal ---------- */
+function openSettings() {
+  $('keyGoogle').value = Settings.keys.google || '';
+  $('keyNaver').value = Settings.keys.naver || '';
+  $('keyKakao').value = Settings.keys.kakao || '';
+  $('optSpeed').value = Settings.outlierSpeed;
+  $('optGap').value = Settings.gapMinutes;
+  $('optThumb').value = Settings.thumbSize;
+  const m = $('settingsModal'); m.classList.remove('hidden'); m.classList.add('flex');
+}
+function closeSettings() { const m = $('settingsModal'); m.classList.add('hidden'); m.classList.remove('flex'); }
+
+async function saveFromSettings() {
+  const prevThumb = Settings.thumbSize, prevSpeed = Settings.outlierSpeed;
+  Settings.keys.google = $('keyGoogle').value.trim();
+  Settings.keys.naver = $('keyNaver').value.trim();
+  Settings.keys.kakao = $('keyKakao').value.trim();
+  Settings.outlierSpeed = Math.max(1, +$('optSpeed').value || 200);
+  Settings.gapMinutes = Math.max(1, +$('optGap').value || 60);
+  Settings.thumbSize = Math.min(120, Math.max(24, +$('optThumb').value || 56));
+  saveSettings();
+  closeSettings();
+
+  // Re-process if outlier threshold changed; regenerate thumbnails if size/threshold changed.
+  if (State.geo.length) {
+    const speedChanged = prevSpeed !== Settings.outlierSpeed;
+    const thumbChanged = prevThumb !== Settings.thumbSize;
+    if (speedChanged) { processOutliers(State.geo); computeClusters(); populateClusterNav(); }
+    if (speedChanged || thumbChanged) {
+      showLoading(true, '썸네일 재생성 중…');
+      for (const p of State.geo) p.pin = await makePin(await displayBlob(p), Settings.thumbSize, p.isOutlier, p.direction);
+      showLoading(false);
+    }
+  }
+  await ensureMapReady(false);
+}
+
+document.addEventListener('DOMContentLoaded', init);
+</script>
+</body>
+</html>
