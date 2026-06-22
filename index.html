@@ -598,6 +598,7 @@ function extractMeta(out) {
     make: out.Make || null,
     model: out.Model || null,
     focalLength: (typeof out.FocalLength === 'number') ? out.FocalLength : null,
+    focal35: (typeof out.FocalLengthIn35mmFilm === 'number') ? out.FocalLengthIn35mmFilm : null,
     fNumber: (typeof out.FNumber === 'number') ? out.FNumber : null,
     iso: (out.ISO != null ? out.ISO : (out.ISOSpeedRatings != null ? out.ISOSpeedRatings : null)),
     altitude: (typeof out.GPSAltitude === 'number') ? out.GPSAltitude : null,
@@ -651,6 +652,21 @@ function destinationPoint(lat, lng, bearingDeg, distM) {
   const la2 = Math.asin(Math.sin(la1) * Math.cos(dr) + Math.cos(la1) * Math.sin(dr) * Math.cos(br));
   const lo2 = lo1 + Math.atan2(Math.sin(br) * Math.sin(dr) * Math.cos(la1), Math.cos(dr) - Math.sin(la1) * Math.sin(la2));
   return { lat: la2 * 180 / Math.PI, lng: lo2 * 180 / Math.PI };
+}
+// Compass bearing (deg, 0=N) from point a to point b.
+function bearing(a, b) {
+  const la1 = a.lat * Math.PI / 180, la2 = b.lat * Math.PI / 180, dLng = (b.lng - a.lng) * Math.PI / 180;
+  const y = Math.sin(dLng) * Math.cos(la2);
+  const x = Math.cos(la1) * Math.sin(la2) - Math.sin(la1) * Math.cos(la2) * Math.cos(dLng);
+  return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+}
+// Horizontal angle of view (deg) from EXIF focal length. Uses the 35mm-equivalent
+// focal length when present (sensor width 36mm); otherwise a sensible default.
+function fovAngle(photo) {
+  const e = photo.exif || {};
+  const f = e.focal35 || null;
+  if (f && f > 0) return Math.max(10, Math.min(120, 2 * Math.atan(36 / (2 * f)) * 180 / Math.PI));
+  return 50;
 }
 // Approx metres-per-pixel at a coordinate using the active map's projection.
 function metersPerPixel(a, coord) {
@@ -1025,7 +1041,8 @@ function createGoogle() {
     },
     drawFov(cones) {
       cones.forEach(c => {
-        const poly = new google.maps.Polygon({ paths: c.map(p => ({ lat: p.lat, lng: p.lng })), map, clickable: false, strokeColor: '#2563eb', strokeOpacity: 0.7, strokeWeight: 1, fillColor: '#2563eb', fillOpacity: 0.18, zIndex: 2 });
+        const col = c.inferred ? '#f59e0b' : '#2563eb';
+        const poly = new google.maps.Polygon({ paths: c.pts.map(p => ({ lat: p.lat, lng: p.lng })), map, clickable: false, strokeColor: col, strokeOpacity: 0.75, strokeWeight: 1, fillColor: col, fillOpacity: c.inferred ? 0.10 : 0.18, zIndex: 2 });
         markers.push(poly);
       });
     },
@@ -1162,9 +1179,10 @@ function createNaver() {
     },
     drawFov(cones) {
       cones.forEach(c => {
+        const col = c.inferred ? '#f59e0b' : '#2563eb';
         const poly = new naver.maps.Polygon({
-          map, paths: c.map(p => new naver.maps.LatLng(p.lat, p.lng)),
-          strokeColor: '#2563eb', strokeOpacity: 0.7, strokeWeight: 1, fillColor: '#2563eb', fillOpacity: 0.18,
+          map, paths: c.pts.map(p => new naver.maps.LatLng(p.lat, p.lng)),
+          strokeColor: col, strokeOpacity: 0.75, strokeWeight: 1, strokeStyle: c.inferred ? 'shortdash' : 'solid', fillColor: col, fillOpacity: c.inferred ? 0.10 : 0.18,
         });
         markers.push(poly);
       });
@@ -1304,9 +1322,10 @@ function createKakao() {
     },
     drawFov(cones) {
       cones.forEach(c => {
+        const col = c.inferred ? '#f59e0b' : '#2563eb';
         const poly = new kakao.maps.Polygon({
-          path: c.map(p => new kakao.maps.LatLng(p.lat, p.lng)),
-          strokeWeight: 1, strokeColor: '#2563eb', strokeOpacity: 0.7, fillColor: '#2563eb', fillOpacity: 0.18,
+          path: c.pts.map(p => new kakao.maps.LatLng(p.lat, p.lng)),
+          strokeWeight: 1, strokeColor: col, strokeOpacity: 0.75, strokeStyle: c.inferred ? 'shortdash' : 'solid', fillColor: col, fillOpacity: c.inferred ? 0.10 : 0.18,
         });
         poly.setMap(map);
         markers.push(poly);
@@ -1451,7 +1470,8 @@ function createLeaflet() {
     },
     drawFov(cones) {
       cones.forEach(c => {
-        L.polygon(c.map(p => [p.lat, p.lng]), { color: '#2563eb', weight: 1, opacity: 0.7, fillColor: '#2563eb', fillOpacity: 0.18, interactive: false }).addTo(markerLayer);
+        const col = c.inferred ? '#f59e0b' : '#2563eb';
+        L.polygon(c.pts.map(p => [p.lat, p.lng]), { color: col, weight: 1, opacity: 0.75, dashArray: c.inferred ? '4,4' : null, fillColor: col, fillOpacity: c.inferred ? 0.10 : 0.18, interactive: false }).addTo(markerLayer);
       });
     },
     drawPath(segments, color, opacity) {
@@ -1575,17 +1595,29 @@ function spreadLayout(n, size) {
 }
 
 // Draw a field-of-view triangle (apex at the GPS point, spreading toward the
-// shooting direction) for each photo that has a direction.
+// shooting direction). The opening angle is the real angle of view from EXIF
+// focal length; the bearing is the measured EXIF compass direction when present
+// (solid), otherwise inferred from the travel direction (dashed/amber).
 function drawFovCones(a, list) {
   if (!a.drawFov) return;
-  const FOV = 50; // degrees — approximate angle of view
   const cones = [];
-  for (const p of list) {
-    if (p.direction == null) continue;
-    const c = p.correctedGps;
+  let measured = 0;
+  for (let i = 0; i < list.length; i++) {
+    const p = list[i], c = p.correctedGps;
+    let dir = (p.direction != null) ? p.direction : null;
+    let inferred = false;
+    if (dir == null) {
+      const prev = list[i - 1], next = list[i + 1];
+      if (prev) dir = bearing(prev.correctedGps, c);
+      else if (next) dir = bearing(c, next.correctedGps);
+      if (dir != null) inferred = true;
+    } else { measured++; }
+    if (dir == null) continue;
+    const half = fovAngle(p) / 2;
     const D = Math.max(15, 70 * metersPerPixel(a, c)); // ~70px long, zoom-adaptive
-    cones.push([c, destinationPoint(c.lat, c.lng, p.direction - FOV / 2, D), destinationPoint(c.lat, c.lng, p.direction + FOV / 2, D)]);
+    cones.push({ pts: [c, destinationPoint(c.lat, c.lng, dir - half, D), destinationPoint(c.lat, c.lng, dir + half, D)], inferred });
   }
+  State._fovMeasured = measured; State._fovTotal = list.length;
   if (cones.length) a.drawFov(cones);
 }
 
