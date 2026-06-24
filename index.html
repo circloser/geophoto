@@ -1567,6 +1567,79 @@ class NoKeyError extends Error {
 const Adapters = { osm: createLeaflet(), google: createGoogle(), naver: createNaver(), kakao: createKakao() };
 function adapter() { return Adapters[State.provider]; }
 
+/* ── Unified heatmap ──────────────────────────────────────────────────────
+   One canvas-based gradient renderer shared by every provider, so the "점구름"
+   (heatmap) looks identical on OpenStreetMap / Google / Naver / Kakao instead
+   of each SDK drawing its own style. Points are placed with the adapter's
+   projectPixel(); the existing onViewChange() hook re-runs renderMarkers, which
+   redraws this on pan/zoom. The blur-brush + gradient-palette technique is a
+   compact port of simpleheat (the engine behind leaflet.heat), tuned to match
+   the previous OpenStreetMap gradient. */
+const Heat = (() => {
+  const RADIUS = 26, BLUR = 18, INTENSITY = 0.32;
+  const GRAD = { 0.2: '#2563eb', 0.4: '#22c55e', 0.6: '#eab308', 0.8: '#f97316', 1.0: '#ef4444' };
+  let canvas = null, ctx = null, brush = null, palette = null;
+
+  // A soft circular brush, built once: an off-canvas circle whose blurred
+  // shadow is cast back onto the canvas (the classic simpleheat trick).
+  function buildBrush() {
+    const r2 = RADIUS + BLUR, c = document.createElement('canvas');
+    c.width = c.height = r2 * 2;
+    const x = c.getContext('2d');
+    x.shadowOffsetX = x.shadowOffsetY = r2 * 2;
+    x.shadowBlur = BLUR; x.shadowColor = 'black';
+    x.beginPath(); x.arc(-r2, -r2, RADIUS, 0, Math.PI * 2, true); x.closePath(); x.fill();
+    return c;
+  }
+  // A 256-entry RGBA lookup table sampled from the gradient (index = density).
+  function buildPalette() {
+    const c = document.createElement('canvas'); c.width = 1; c.height = 256;
+    const x = c.getContext('2d'), g = x.createLinearGradient(0, 0, 0, 256);
+    for (const s in GRAD) g.addColorStop(+s, GRAD[s]);
+    x.fillStyle = g; x.fillRect(0, 0, 1, 256);
+    return x.getImageData(0, 0, 1, 256).data;
+  }
+  function ensure() {
+    if (canvas) return;
+    canvas = document.createElement('canvas');
+    canvas.id = 'heatCanvas';
+    canvas.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;z-index:5;';
+    document.getElementById('map').parentElement.appendChild(canvas);
+    ctx = canvas.getContext('2d');
+    brush = buildBrush(); palette = buildPalette();
+  }
+  return {
+    render(a, coords) {
+      ensure();
+      const wrap = canvas.parentElement, w = wrap.clientWidth, h = wrap.clientHeight;
+      if (!w || !h) return; // map container not laid out yet — onViewChange will redraw
+      if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+      canvas.style.display = '';
+      ctx.clearRect(0, 0, w, h);
+      // 1) Accumulate density in greyscale (overlapping brushes build alpha).
+      const r2 = RADIUS + BLUR; let drawn = 0;
+      ctx.globalAlpha = INTENSITY;
+      for (const c of coords) {
+        const p = a.projectPixel ? a.projectPixel(c) : null;
+        if (!p) continue;
+        if (p.x < -r2 || p.y < -r2 || p.x > w + r2 || p.y > h + r2) continue; // off-screen
+        ctx.drawImage(brush, p.x - r2, p.y - r2); drawn++;
+      }
+      ctx.globalAlpha = 1;
+      if (!drawn) return;
+      // 2) Colourise: map each pixel's accumulated alpha through the palette.
+      const img = ctx.getImageData(0, 0, w, h), d = img.data, pal = palette;
+      for (let i = 3; i < d.length; i += 4) {
+        const al = d[i]; if (!al) continue;
+        const j = al * 4;
+        d[i - 3] = pal[j]; d[i - 2] = pal[j + 1]; d[i - 1] = pal[j + 2];
+      }
+      ctx.putImageData(img, 0, 0);
+    },
+    clear() { if (canvas) { ctx.clearRect(0, 0, canvas.width, canvas.height); canvas.style.display = 'none'; } },
+  };
+})();
+
 let viewRenderTimer = null;
 async function ensureMapReady(fit) {
   const a = adapter();
@@ -1705,16 +1778,15 @@ function renderMarkers() {
 
   if (!useThumbs) {
     if (State.simplifiedMode === 'heat') {
-      if (a.renderHeat) a.renderHeat(vg.map(p => p.correctedGps));
-      else for (const p of vg) a.addDot(p, p.correctedGps, 'heat', () => onPinClick(p), false);
+      Heat.render(a, vg.map(p => p.correctedGps));
     } else {
-      if (a.clearHeat) a.clearHeat();
+      Heat.clear();
       for (const p of vg) a.addDot(p, p.correctedGps, 'dot', () => onPinClick(p), isPicked(p));
     }
     updateStatus(undefined, { tooMany, useThumbs });
     return;
   }
-  if (a.clearHeat) a.clearHeat();
+  Heat.clear();
 
   // Thumbnails. Overlapping pins are merged into ONE representative thumbnail with
   // a "+count" badge (no radial fan). Zooming in splits the group naturally.
