@@ -45,6 +45,27 @@
     pointer-events: none;
   }
 
+  /* Toolbar dropdown menus — group related controls so the bar stays uncluttered */
+  .dd { position: relative; }
+  .dd-btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; font-size: 14px; line-height: 1.2; border: 1px solid #cbd5e1; border-radius: 6px; background: #fff; color: #334155; cursor: pointer; white-space: nowrap; }
+  .dd-btn:hover { background: #f8fafc; }
+  .dd.open .dd-btn { background: #eff6ff; border-color: #93c5fd; }
+  .dd-caret { font-size: 10px; color: #94a3b8; }
+  .dd-dot { width: 7px; height: 7px; border-radius: 50%; background: #2563eb; display: none; }
+  .dd.has-active .dd-dot { display: inline-block; }
+  .dd-panel { position: absolute; top: calc(100% + 5px); left: 0; min-width: 214px; background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 10px 30px rgba(2,6,23,.16); padding: 8px; z-index: 60; display: none; }
+  .dd.open .dd-panel { display: block; }
+  .dd-panel.dd-right { left: auto; right: 0; }
+  .dd-form { display: flex; flex-direction: column; gap: 7px; }
+  .dd-label { font-size: 11px; font-weight: 600; color: #94a3b8; margin: 3px 2px -3px; }
+  .dd-select { width: 100%; font-size: 13px; border: 1px solid #cbd5e1; border-radius: 7px; padding: 6px 8px; background: #fff; color: #334155; }
+  .dd-item { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; font-size: 13px; padding: 7px 9px; border-radius: 8px; border: 1px solid transparent; background: #fff; color: #334155; cursor: pointer; }
+  .dd-item:hover { background: #f1f5f9; }
+  .dd-item.between { justify-content: space-between; }
+  .dd-item:disabled { opacity: .45; cursor: not-allowed; }
+  .dd-item:disabled:hover { background: #fff; }
+  .dd-sep { height: 1px; background: #e2e8f0; margin: 5px 2px; }
+
   /* Cluster count badge ("+N") on a representative thumbnail */
   .count-badge {
     min-width: 18px; height: 18px; padding: 0 4px; border-radius: 9999px;
@@ -183,65 +204,96 @@
 
   <!-- ===== Toolbar ===== -->
   <header class="flex items-center gap-2 flex-wrap px-3 py-2 bg-white border-b border-slate-200 shadow-sm z-10">
-    <div class="flex items-center gap-2 mr-2">
+    <div class="flex items-center gap-2 mr-1">
       <span class="text-lg">🗺️</span>
-      <span class="font-bold text-slate-700 hidden sm:inline">GeoPhoto Map Navigator</span>
+      <span class="font-bold text-slate-700 hidden lg:inline">GeoPhoto</span>
     </div>
 
+    <!-- Primary action -->
     <label class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-md cursor-pointer">
       📁 <span>폴더 선택</span>
       <input id="folderInput" type="file" accept="image/*" multiple webkitdirectory directory class="hidden" />
     </label>
-    <label class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-700 text-sm rounded-md cursor-pointer" title="개별 파일 선택 (폴더 대신)">
-      🖼️ <span class="hidden md:inline">파일</span>
-      <input id="filesInput" type="file" accept="image/*" multiple class="hidden" />
-    </label>
 
-    <button id="trackBtn" class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-700 text-sm rounded-md" title="GPX 트랙으로 GPS 없는 사진에 좌표 부여">🛰 <span class="hidden md:inline">트랙</span></button>
+    <!-- 불러오기 (개별 파일 / GPX 트랙 / 프로젝트 열기) -->
+    <div class="dd" id="ddLoad">
+      <button type="button" class="dd-btn">📥 <span class="hidden sm:inline">불러오기</span> <span class="dd-caret">▾</span></button>
+      <div class="dd-panel dd-form">
+        <label class="dd-item cursor-pointer" title="폴더 대신 개별 이미지 파일 선택">
+          🖼️ <span>개별 파일 선택</span>
+          <input id="filesInput" type="file" accept="image/*" multiple class="hidden" />
+        </label>
+        <button id="trackBtn" type="button" class="dd-item" title="GPX 트랙으로 GPS 없는 사진에 좌표 부여">🛰 <span>GPX 트랙으로 좌표 부여</span></button>
+        <button id="openProjectBtn" type="button" class="dd-item" title="저장한 프로젝트 불러오기">📂 <span>프로젝트 열기</span></button>
+      </div>
+    </div>
 
     <div class="h-6 w-px bg-slate-200 mx-1"></div>
 
-    <select id="providerSelect" class="text-sm border border-slate-300 rounded-md px-2 py-1.5 bg-white">
-      <option value="osm">OpenStreetMap (키 불필요)</option>
-      <option value="google">Google Maps</option>
-      <option value="naver">Naver Maps</option>
-      <option value="kakao">Kakao Maps</option>
-    </select>
+    <!-- 지도 (제공자 / 종류 / 지적도) -->
+    <div class="dd" id="ddMap">
+      <button type="button" class="dd-btn">🗺 <span class="hidden sm:inline">지도</span> <span class="dd-dot"></span><span class="dd-caret">▾</span></button>
+      <div class="dd-panel dd-form">
+        <label class="dd-label">지도 제공자</label>
+        <select id="providerSelect" class="dd-select">
+          <option value="osm">OpenStreetMap (키 불필요)</option>
+          <option value="google">Google Maps</option>
+          <option value="naver">Naver Maps</option>
+          <option value="kakao">Kakao Maps</option>
+        </select>
+        <label class="dd-label">지도 종류</label>
+        <select id="mapTypeSelect" class="dd-select">
+          <option value="roadmap">일반</option>
+          <option value="satellite">위성</option>
+          <option value="hybrid">하이브리드</option>
+        </select>
+        <button id="cadastralBtn" type="button" class="dd-item between disabled:opacity-40" title="지적편집도 (네이버/카카오 전용)">🗺 지적편집도 <span id="cadastralState" class="font-semibold text-slate-400">OFF</span></button>
+      </div>
+    </div>
 
-    <select id="mapTypeSelect" class="text-sm border border-slate-300 rounded-md px-2 py-1.5 bg-white" title="지도 종류">
-      <option value="roadmap">일반</option>
-      <option value="satellite">위성</option>
-      <option value="hybrid">하이브리드</option>
-    </select>
+    <!-- 보기 (썸네일 / 표시 방식 / 경로 / 화각) -->
+    <div class="dd" id="ddView">
+      <button type="button" class="dd-btn">👁 <span class="hidden sm:inline">보기</span> <span class="dd-dot"></span><span class="dd-caret">▾</span></button>
+      <div class="dd-panel dd-form">
+        <button id="thumbToggle" type="button" class="dd-item between">🖼 썸네일 <span id="thumbState" class="font-semibold text-blue-600">ON</span></button>
+        <label class="dd-label">밀집 표시 (썸네일 OFF 시)</label>
+        <select id="modeSelect" class="dd-select" title="썸네일 OFF / 밀집 시 표시 방식">
+          <option value="dot">점 (Dot)</option>
+          <option value="heat">점구름 (Heatmap)</option>
+        </select>
+        <label class="dd-label">이동 경로</label>
+        <select id="pathSelect" class="dd-select" title="이동 경로 선">
+          <option value="corrected">보정 좌표</option>
+          <option value="original">원본 좌표</option>
+          <option value="off">끄기</option>
+        </select>
+        <button id="fovBtn" type="button" class="dd-item between" title="촬영 방향/화각을 삼각형으로 표시">📐 화각 표시 <span id="fovState" class="font-semibold text-slate-400">OFF</span></button>
+      </div>
+    </div>
 
-    <button id="cadastralBtn" class="px-3 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed" title="지적편집도 (네이버/카카오 전용)">지적도: <span id="cadastralState" class="font-semibold text-slate-400">OFF</span></button>
+    <!-- 도구 (지명 채우기 / 즐겨찾기 / 비교 / 군집 이동) -->
+    <div class="dd" id="ddTools">
+      <button type="button" class="dd-btn">🧰 <span class="hidden sm:inline">도구</span> <span class="dd-dot"></span><span class="dd-caret">▾</span></button>
+      <div class="dd-panel dd-form">
+        <button id="geocodeBtn" type="button" class="dd-item" title="보이는 사진의 좌표로 지명 자동 채우기 (OpenStreetMap Nominatim)">🏷 <span>지명 자동 채우기</span></button>
+        <button id="favFilterBtn" type="button" class="dd-item between" title="즐겨찾기한 사진만 보기">♥ 즐겨찾기만 보기 <span id="favFilterState" class="font-semibold text-slate-400">OFF</span></button>
+        <button id="compareBtn" type="button" class="dd-item between" title="두 사진을 좌우로 비교">⚖ 비교 모드 <span id="compareState" class="font-semibold text-slate-400">OFF</span></button>
+        <div class="dd-sep"></div>
+        <button id="fitAllBtn" type="button" class="dd-item" title="모든 사진이 보이도록 맞춤">⊡ <span>전체 보기</span></button>
+        <span id="clusterNav" class="hidden items-center gap-1">
+          <button id="clusterPrev" class="px-2 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50" title="이전 군집">◀</button>
+          <select id="clusterSelect" class="dd-select flex-1" title="군집으로 이동"></select>
+          <button id="clusterNext" class="px-2 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50" title="다음 군집">▶</button>
+        </span>
+      </div>
+    </div>
 
-    <button id="thumbToggle" class="px-3 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50">
-      썸네일: <span id="thumbState" class="font-semibold text-blue-600">ON</span>
-    </button>
+    <div class="h-6 w-px bg-slate-200 mx-1"></div>
 
-    <select id="modeSelect" class="text-sm border border-slate-300 rounded-md px-2 py-1.5 bg-white" title="썸네일 OFF / 밀집 시 표시 방식">
-      <option value="dot">점 (Dot)</option>
-      <option value="heat">점구름 (Heatmap)</option>
-    </select>
+    <!-- Standalone primary features -->
+    <button id="albumBtn" class="px-3 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50" title="날짜별 사진 앨범으로 보기">📔 <span class="hidden sm:inline">앨범</span></button>
 
-    <select id="pathSelect" class="text-sm border border-slate-300 rounded-md px-2 py-1.5 bg-white" title="이동 경로 선">
-      <option value="corrected">경로: 보정</option>
-      <option value="original">경로: 원본</option>
-      <option value="off">경로: 끄기</option>
-    </select>
-
-    <span id="clusterNav" class="hidden items-center gap-1">
-      <div class="h-6 w-px bg-slate-200 mx-1"></div>
-      <button id="fitAllBtn" class="px-3 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50" title="모든 사진이 보이도록 맞춤">⊡ 전체 보기</button>
-      <button id="clusterPrev" class="px-2 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50" title="이전 군집">◀</button>
-      <select id="clusterSelect" class="text-sm border border-slate-300 rounded-md px-2 py-1.5 bg-white" title="군집으로 이동"></select>
-      <button id="clusterNext" class="px-2 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50" title="다음 군집">▶</button>
-    </span>
-
-    <button id="geocodeBtn" class="px-3 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50" title="보이는 사진의 좌표로 지명 자동 채우기 (OpenStreetMap Nominatim)">🏷 지명 채우기</button>
-
-    <select id="exportSelect" class="text-sm border border-slate-300 rounded-md px-2 py-1.5 bg-white" title="조사 데이터 내보내기">
+    <select id="exportSelect" class="text-sm border border-slate-300 rounded-md px-2 py-1.5 bg-white" title="데이터/앨범 내보내기">
       <option value="">⬇ 내보내기</option>
       <option value="geojson">GeoJSON (.geojson)</option>
       <option value="kml">KML (.kml)</option>
@@ -251,21 +303,11 @@
       <option value="album">📔 공유용 여행 앨범 (.html)</option>
     </select>
 
-    <button id="fovBtn" class="px-3 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50" title="촬영 방향/화각을 삼각형으로 표시">📐 화각: <span id="fovState" class="font-semibold text-slate-400">OFF</span></button>
-
-    <button id="albumBtn" class="px-3 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50" title="날짜별 사진 앨범으로 보기">📔 앨범</button>
-
-    <button id="favFilterBtn" class="px-3 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50" title="즐겨찾기한 사진만 보기">♥ 즐겨찾기: <span id="favFilterState" class="font-semibold text-slate-400">OFF</span></button>
-
-    <button id="compareBtn" class="px-3 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50" title="두 사진을 좌우로 비교">⚖ 비교: <span id="compareState" class="font-semibold text-slate-400">OFF</span></button>
-
-    <div class="h-6 w-px bg-slate-200 mx-1"></div>
-    <button id="saveProjectBtn" class="px-3 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50" title="현재 작업(좌표·보정·메모·즐겨찾기)을 파일로 저장">💾 저장</button>
-    <button id="openProjectBtn" class="px-3 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50" title="저장한 프로젝트 불러오기">📂 열기</button>
+    <button id="saveProjectBtn" class="px-3 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50" title="현재 작업(좌표·보정·메모·즐겨찾기)을 파일로 저장">💾 <span class="hidden sm:inline">저장</span></button>
     <input id="projectInput" type="file" accept=".json,.geophoto,application/json" class="hidden" />
     <input id="reattachInput" type="file" accept="image/*" multiple webkitdirectory directory class="hidden" />
 
-    <button id="settingsBtn" class="px-3 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50">⚙️ 설정</button>
+    <button id="settingsBtn" class="px-3 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50">⚙️ <span class="hidden sm:inline">설정</span></button>
 
     <span id="netBadge" class="ml-auto inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-emerald-100 text-emerald-700" title="네트워크 상태">● 온라인</span>
     <div id="status" class="text-xs text-slate-500 leading-tight text-right"></div>
@@ -2041,6 +2083,7 @@ function toggleCompareMode() {
   $('compareState').className = 'font-semibold ' + (State.compareMode ? 'text-blue-600' : 'text-slate-400');
   if (!State.compareMode) clearCompare();
   else { closeDetail(); renderCompareTray(); }
+  updateMenuDots();
 }
 function toggleCompare(photo) {
   const i = State.compareSet.findIndex(p => p.id === photo.id);
@@ -2362,6 +2405,34 @@ function updateCadastralButton() {
   btn.disabled = !ok;
   st.textContent = (ok && State.cadastral) ? 'ON' : 'OFF';
   st.className = 'font-semibold ' + (ok && State.cadastral ? 'text-blue-600' : 'text-slate-400');
+  updateMenuDots();
+}
+
+/* Toolbar dropdown menus: open/close on click, close on outside-click / Escape,
+   and show a dot on a menu's trigger when one of its toggles is active (so the
+   active state stays visible while the menu is collapsed). */
+function initDropdowns() {
+  const dds = [...document.querySelectorAll('.dd')];
+  dds.forEach(dd => {
+    const btn = dd.querySelector('.dd-btn');
+    if (!btn) return;
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      const open = dd.classList.contains('open');
+      dds.forEach(d => d.classList.remove('open'));
+      if (!open) dd.classList.add('open');
+    });
+    const panel = dd.querySelector('.dd-panel');
+    if (panel) panel.addEventListener('click', e => e.stopPropagation()); // keep open while using controls
+  });
+  document.addEventListener('click', () => dds.forEach(d => d.classList.remove('open')));
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') dds.forEach(d => d.classList.remove('open')); });
+}
+function updateMenuDots() {
+  const set = (id, on) => { const el = document.getElementById(id); if (el) el.classList.toggle('has-active', !!on); };
+  set('ddMap', State.cadastral && cadastralSupported());
+  set('ddView', State.showFov);
+  set('ddTools', State.favoritesOnly || State.compareMode);
 }
 function toggleCadastral() {
   if (!cadastralSupported()) return;
@@ -2979,7 +3050,7 @@ function toggleFavoritesFilter() {
   State.favoritesOnly = !State.favoritesOnly;
   $('favFilterState').textContent = State.favoritesOnly ? 'ON' : 'OFF';
   $('favFilterState').className = 'font-semibold ' + (State.favoritesOnly ? 'text-rose-500' : 'text-slate-400');
-  renderAll(); updateStatus();
+  renderAll(); updateStatus(); updateMenuDots();
 }
 
 /* =========================================================================
@@ -3120,6 +3191,7 @@ function init() {
   State.provider = 'osm';
   $('providerSelect').value = State.provider;
   $('mapTypeSelect').value = State.mapType;
+  initDropdowns();
   updateCadastralButton();
 
   $('folderInput').addEventListener('change', e => { if (e.target.files.length) loadFiles(e.target.files); });
@@ -3147,7 +3219,7 @@ function init() {
     State.showFov = !State.showFov;
     $('fovState').textContent = State.showFov ? 'ON' : 'OFF';
     $('fovState').className = 'font-semibold ' + (State.showFov ? 'text-blue-600' : 'text-slate-400');
-    renderMarkers();
+    renderMarkers(); updateMenuDots();
   });
 
   // Favourites filter
