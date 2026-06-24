@@ -248,9 +248,12 @@
       <option value="csv">CSV (.csv)</option>
       <option value="xmp">XMP 사이드카 (.zip)</option>
       <option value="exifjpeg">EXIF 기록 JPEG (.zip)</option>
+      <option value="album">📔 공유용 여행 앨범 (.html)</option>
     </select>
 
     <button id="fovBtn" class="px-3 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50" title="촬영 방향/화각을 삼각형으로 표시">📐 화각: <span id="fovState" class="font-semibold text-slate-400">OFF</span></button>
+
+    <button id="albumBtn" class="px-3 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50" title="날짜별 사진 앨범으로 보기">📔 앨범</button>
 
     <button id="favFilterBtn" class="px-3 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50" title="즐겨찾기한 사진만 보기">♥ 즐겨찾기: <span id="favFilterState" class="font-semibold text-slate-400">OFF</span></button>
 
@@ -311,6 +314,15 @@
       <div class="absolute bottom-3 left-3 bg-white/90 rounded-lg shadow px-3 py-2 text-xs text-slate-600 space-y-1">
         <div class="flex items-center gap-2"><span class="inline-block w-3 h-3 rounded-full bg-blue-600"></span> 정상 위치</div>
         <div class="flex items-center gap-2"><span class="inline-block w-3 h-3 rounded-full bg-amber-500"></span> 보정된 이상치</div>
+      </div>
+
+      <!-- Album (day-by-day photo grid) overlay -->
+      <div id="albumPanel" class="hidden absolute inset-0 z-30 bg-slate-50 overflow-auto">
+        <div class="sticky top-0 z-10 flex items-center justify-between px-4 py-2.5 bg-white/95 backdrop-blur border-b border-slate-200">
+          <div class="font-bold text-slate-700">📔 여행 앨범 <span id="albumSummary" class="text-xs font-normal text-slate-400 ml-1"></span></div>
+          <button id="albumClose" class="dctl">🗺 지도로</button>
+        </div>
+        <div id="albumBody" class="p-3 sm:p-4 space-y-7"></div>
       </div>
     </div>
 
@@ -475,6 +487,19 @@
   #detailMemo { width: 100%; resize: vertical; min-height: 34px; border: 1px solid #e2e8f0; border-radius: 8px; padding: 6px 8px; font-size: 12px; }
   #detailTags { width: 100%; border: 1px solid #e2e8f0; border-radius: 8px; padding: 5px 8px; font-size: 12px; }
 
+  /* Album: day-by-day photo grid */
+  #albumBody .day-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+  #albumBody .day-num { font-weight: 700; color: #2563eb; font-size: 15px; }
+  #albumBody .day-date { color: #475569; font-size: 13px; }
+  #albumBody .day-place { color: #0f766e; font-size: 12px; }
+  #albumBody .day-count { margin-left: auto; color: #94a3b8; font-size: 12px; }
+  .album-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 8px; }
+  .album-cell { position: relative; aspect-ratio: 1; border-radius: 12px; overflow: hidden; background: #e2e8f0; cursor: pointer; box-shadow: 0 1px 3px rgba(0,0,0,.12); transition: transform .12s ease, box-shadow .12s ease; }
+  .album-cell:hover { transform: translateY(-2px) scale(1.02); box-shadow: 0 4px 12px rgba(0,0,0,.18); }
+  .album-cell img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .album-cell .acell-fav { position: absolute; top: 4px; right: 5px; color: #ef4444; font-size: 13px; text-shadow: 0 1px 2px rgba(0,0,0,.5); }
+  .album-cell .acell-tag { position: absolute; bottom: 3px; left: 4px; font-size: 9px; background: rgba(15,23,42,.6); color: #fff; padding: 0 5px; border-radius: 6px; }
+
   /* Detail pane open animation (a little charm) */
   #detailPane.flex { animation: slideIn .22s ease; }
   @keyframes slideIn { from { transform: translateX(16px); opacity: .4; } to { transform: none; opacity: 1; } }
@@ -550,6 +575,7 @@ const State = {
   showFov: false,          // draw shooting-direction field-of-view cones on the map
   favoritesOnly: false,    // show only favourited photos
   slideTimer: null,        // detail-pane slideshow interval id
+  albumOpen: false,        // day-by-day album overlay shown
 };
 
 const PERF_CAP = 800;      // above this many photos, fall back to dots for performance
@@ -2603,6 +2629,7 @@ async function applyTrackTagging() {
 }
 
 function exportData(fmt) {
+  if (fmt === 'album') { exportAlbumHTML(); return; }
   const list = visibleGeo();
   if (!list.length) { alert('내보낼 GPS 사진이 없습니다.'); return; }
   const stamp = new Date().toISOString().slice(0, 10);
@@ -2611,6 +2638,213 @@ function exportData(fmt) {
   else if (fmt === 'csv') download(`geophoto-${stamp}.csv`, 'text/csv;charset=utf-8', buildCSV(list));
   else if (fmt === 'xmp') exportXMPZip(list);
   else if (fmt === 'exifjpeg') exportExifJpegZip(list);
+}
+
+/* =========================================================================
+   Shareable travel album — self-contained .html with embedded photos + map.
+   Opens in any browser; photos are baked in as data-URLs (works offline),
+   the mini-map loads Leaflet/OSM tiles from the CDN when online.
+   ========================================================================= */
+// Downscaled JPEG data-URL of a photo (keeps aspect; caps the long edge).
+async function makeMediumDataURL(blob, maxEdge = 1100, q = 0.82) {
+  let src;
+  try { src = await createImageBitmap(blob, { imageOrientation: 'from-image' }); }
+  catch (e) { try { const r = await loadImageEl(blob); src = r.img; } catch (_) { return null; } }
+  const sw = src.width || src.naturalWidth, sh = src.height || src.naturalHeight;
+  if (!sw || !sh) return null;
+  let w = sw, h = sh;
+  if (Math.max(w, h) > maxEdge) { const s = maxEdge / Math.max(w, h); w = Math.round(w * s); h = Math.round(h * s); }
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  c.getContext('2d').drawImage(src, 0, 0, w, h);
+  if (src.close) src.close();
+  return { url: c.toDataURL('image/jpeg', q), w, h };
+}
+
+async function exportAlbumHTML() {
+  const list = State.detailList;
+  if (!list.length) { alert('내보낼 사진이 없습니다.'); return; }
+  showLoading(true, `앨범 생성 중… 0 / ${list.length}`);
+  try {
+    const photos = [];
+    for (let i = 0; i < list.length; i++) {
+      const p = list[i];
+      setLoadingText(`앨범 생성 중… ${i + 1} / ${list.length}`);
+      const blob = p._displayBlob || (p._file ? await displayBlob(p) : null);
+      let img = blob ? await makeMediumDataURL(blob) : null;
+      if (!img && p.pin) img = { url: p.pin.url, w: 132, h: 132 };
+      if (!img) continue;
+      const g = p.hasGps ? p.correctedGps : null;
+      photos.push({
+        i, src: img.url, w: img.w, h: img.h,
+        lat: g ? +g.lat.toFixed(6) : null, lng: g ? +g.lng.toFixed(6) : null,
+        t: p.timestamp, name: p.fileName || '',
+        place: p.placeName || '',
+        fav: !!(p.attrs && p.attrs.fav),
+        rating: (p.attrs && p.attrs.rating) || 0,
+        memo: (p.attrs && p.attrs.memo) || '',
+      });
+      if (i % 4 === 0) await new Promise(r => setTimeout(r, 0));
+    }
+    if (!photos.length) { alert('내보낼 수 있는 사진 이미지가 없습니다. (원본 파일이 연결되어 있어야 합니다)'); return; }
+
+    // Group photo indices by calendar day (using the original detailList order).
+    const byDay = new Map();
+    for (const ph of photos) { const k = dayKey(ph.t); if (!byDay.has(k)) byDay.set(k, []); byDay.get(k).push(ph.i); }
+    const days = [...byDay.entries()].sort((a, b) => a[0] - b[0]).map(([d, idxs]) => [d, idxs]);
+
+    const tmin = Math.min(...photos.map(p => p.t)), tmax = Math.max(...photos.map(p => p.t));
+    const geoN = photos.filter(p => p.lat != null).length;
+    const meta = { count: photos.length, geoN, days: days.length, tmin, tmax };
+    const html = buildAlbumHTML({ meta, photos, days });
+    const stamp = new Date(tmin).toISOString().slice(0, 10);
+    downloadBlob(`여행앨범-${stamp}.html`, new Blob([html], { type: 'text/html;charset=utf-8' }));
+  } catch (e) {
+    console.error(e); alert('앨범 생성 중 오류가 발생했습니다: ' + (e && e.message ? e.message : e));
+  } finally {
+    showLoading(false);
+  }
+}
+
+function buildAlbumHTML(data) {
+  // Bake the data JSON into the exported file's script element. The dangerous
+  // sequences are assembled from ASCII fragments at runtime so the source of
+  // THIS file never literally contains an HTML comment-open or a script
+  // start/end tag, either of which would flip the HTML tokenizer into its
+  // escaped / double-escaped state and swallow the real end tag, breaking the
+  // entire app and leaving every function undefined.
+  const reClose = new RegExp('<' + '/script', 'gi');
+  const reComment = new RegExp('<' + '!--', 'g');
+  const reLS = new RegExp(String.fromCharCode(0x2028), 'g');
+  const rePS = new RegExp(String.fromCharCode(0x2029), 'g');
+  const json = JSON.stringify(data)
+    .replace(reClose, '<' + '\\/script')
+    .replace(reComment, '<' + '\\!--')
+    .replace(reLS, '\\u2028')
+    .replace(rePS, '\\u2029');
+  const dr = (() => {
+    const a = new Date(data.meta.tmin), b = new Date(data.meta.tmax);
+    const f = d => `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}`;
+    return f(a) === f(b) ? f(a) : `${f(a)} – ${f(b)}`;
+  })();
+  return `<!doctype html>
+<html lang="ko"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>여행 앨범 · ${dr}</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  :root{--bg:#f6f7f9;--card:#fff;--ink:#1e293b;--sub:#64748b;--line:#e2e8f0;--accent:#2563eb;--rose:#f43f5e;}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Apple SD Gothic Neo',Roboto,'Noto Sans KR',sans-serif;background:var(--bg);color:var(--ink);-webkit-font-smoothing:antialiased;}
+  .hero{position:relative;padding:34px 20px 28px;text-align:center;background:linear-gradient(135deg,#2563eb,#7c3aed 60%,#db2777);color:#fff;}
+  .hero h1{margin:0 0 6px;font-size:26px;letter-spacing:-.4px;}
+  .hero .range{font-size:14px;opacity:.92;}
+  .hero .stats{margin-top:14px;display:flex;gap:18px;justify-content:center;flex-wrap:wrap;font-size:13px;opacity:.96;}
+  .hero .stats b{font-size:17px;display:block;font-weight:700;}
+  .wrap{max-width:920px;margin:0 auto;padding:18px 14px 60px;}
+  #map{height:300px;border-radius:16px;margin:18px 0 6px;box-shadow:0 4px 16px rgba(2,6,23,.10);z-index:0;}
+  .maphint{font-size:12px;color:var(--sub);text-align:center;margin-bottom:8px;}
+  .day{margin-top:26px;}
+  .day-h{display:flex;align-items:baseline;gap:10px;margin:0 2px 12px;flex-wrap:wrap;}
+  .day-h .n{background:var(--accent);color:#fff;font-weight:700;font-size:12px;padding:3px 10px;border-radius:999px;}
+  .day-h .d{font-weight:700;font-size:16px;}
+  .day-h .p{color:var(--sub);font-size:13px;}
+  .day-h .c{color:#94a3b8;font-size:12px;margin-left:auto;}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(116px,1fr));gap:9px;}
+  .cell{position:relative;aspect-ratio:1;border-radius:13px;overflow:hidden;cursor:pointer;background:#e2e8f0;box-shadow:0 1px 3px rgba(2,6,23,.10);transition:transform .12s ease;}
+  .cell:hover{transform:translateY(-2px) scale(1.02);}
+  .cell img{width:100%;height:100%;object-fit:cover;display:block;}
+  .cell .fav{position:absolute;top:6px;right:7px;color:#fff;filter:drop-shadow(0 1px 2px rgba(0,0,0,.5));font-size:14px;}
+  .cell .ng{position:absolute;bottom:6px;left:6px;background:rgba(15,23,42,.72);color:#fff;font-size:10px;padding:1px 6px;border-radius:6px;}
+  footer{text-align:center;color:#94a3b8;font-size:12px;margin-top:36px;}
+  /* lightbox */
+  #lb{position:fixed;inset:0;background:rgba(8,11,20,.94);display:none;align-items:center;justify-content:center;z-index:1000;}
+  #lb.on{display:flex;}
+  #lb img{max-width:94vw;max-height:80vh;border-radius:8px;box-shadow:0 10px 40px rgba(0,0,0,.5);}
+  #lb .cap{position:absolute;bottom:0;left:0;right:0;padding:16px 18px 22px;color:#fff;background:linear-gradient(transparent,rgba(0,0,0,.82));text-align:center;}
+  #lb .cap .ttl{font-weight:600;font-size:15px;}
+  #lb .cap .sub{font-size:12.5px;opacity:.82;margin-top:3px;}
+  #lb .cap .memo{font-size:13px;opacity:.95;margin-top:7px;white-space:pre-wrap;}
+  #lb .nav{position:absolute;top:50%;transform:translateY(-50%);font-size:34px;color:#fff;cursor:pointer;user-select:none;padding:10px 16px;opacity:.7;}
+  #lb .nav:hover{opacity:1;}
+  #lb .prev{left:6px;} #lb .next{right:6px;}
+  #lb .x{position:absolute;top:12px;right:16px;font-size:26px;color:#fff;cursor:pointer;opacity:.8;}
+  @media(max-width:520px){.hero h1{font-size:22px}#map{height:240px}}
+</style>
+</head><body>
+<div class="hero">
+  <h1>📔 여행 앨범</h1>
+  <div class="range">${dr}</div>
+  <div class="stats"><div><b>${data.meta.count}</b>사진</div><div><b>${data.meta.days}</b>일</div><div><b>${data.meta.geoN}</b>위치</div></div>
+</div>
+<div class="wrap">
+  <div id="map"></div>
+  <div class="maphint" id="maphint">📍 촬영 위치 · 이동 경로 (온라인일 때 지도 표시)</div>
+  <div id="days"></div>
+  <footer>GeoPhoto Map Navigator 로 만든 앨범 · 사진은 파일에 포함되어 오프라인에서도 열립니다</footer>
+</div>
+<div id="lb"><span class="x" onclick="LB.close()">✕</span><span class="nav prev" onclick="LB.go(-1)">‹</span><img id="lbimg" alt=""><span class="nav next" onclick="LB.go(1)">›</span><div class="cap" id="lbcap"></div></div>
+<script>var ALBUM=${json};<\/script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"><\/script>
+<script>
+(function(){
+  var A=ALBUM, P=A.photos, byI={}; P.forEach(function(p){byI[p.i]=p;});
+  var wd=['일','월','화','수','목','금','토'];
+  function pad(n){return String(n).padStart(2,'0');}
+  function fdate(ms){var d=new Date(ms);return d.getFullYear()+'.'+pad(d.getMonth()+1)+'.'+pad(d.getDate())+' ('+wd[d.getDay()]+')';}
+  function ftime(ms){var d=new Date(ms);return pad(d.getHours())+':'+pad(d.getMinutes());}
+  function stars(n){return n?'★★★★★'.slice(0,n)+'☆☆☆☆☆'.slice(0,5-n):'';}
+  function esc(s){return String(s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+  // day sections
+  var root=document.getElementById('days'), order=[];
+  A.days.forEach(function(entry,di){
+    var dayMs=entry[0], idxs=entry[1];
+    var place='';for(var k=0;k<idxs.length;k++){if(byI[idxs[k]]&&byI[idxs[k]].place){place=byI[idxs[k]].place;break;}}
+    var sec=document.createElement('div');sec.className='day';
+    var cells=idxs.map(function(ix){
+      var p=byI[ix];if(!p)return '';order.push(p.i);
+      return '<div class="cell" data-i="'+p.i+'"><img loading="lazy" src="'+p.src+'" alt="">'+
+        (p.fav?'<span class="fav">♥</span>':'')+(p.lat==null?'<span class="ng">위치없음</span>':'')+'</div>';
+    }).join('');
+    sec.innerHTML='<div class="day-h"><span class="n">Day '+(di+1)+'</span><span class="d">'+fdate(dayMs)+'</span>'+
+      (place?'<span class="p">📍 '+esc(place)+'</span>':'')+'<span class="c">'+idxs.length+'장</span></div>'+
+      '<div class="grid">'+cells+'</div>';
+    root.appendChild(sec);
+  });
+  // lightbox
+  var lb=document.getElementById('lb'), lbimg=document.getElementById('lbimg'), lbcap=document.getElementById('lbcap'), cur=0;
+  window.LB={
+    open:function(i){cur=order.indexOf(i);if(cur<0)cur=0;this.show();lb.classList.add('on');},
+    close:function(){lb.classList.remove('on');},
+    go:function(d){cur=(cur+d+order.length)%order.length;this.show();},
+    show:function(){var p=byI[order[cur]];lbimg.src=p.src;
+      var sub=[ftime(p.t),p.place?esc(p.place):'',p.rating?stars(p.rating):'',p.fav?'♥':''].filter(Boolean).join(' · ');
+      lbcap.innerHTML='<div class="ttl">'+esc(p.name)+'</div><div class="sub">'+sub+'</div>'+(p.memo?'<div class="memo">'+esc(p.memo)+'</div>':'');}
+  };
+  root.addEventListener('click',function(e){var c=e.target.closest('.cell');if(c)LB.open(+c.dataset.i);});
+  lb.addEventListener('click',function(e){if(e.target===lb)LB.close();});
+  document.addEventListener('keydown',function(e){if(!lb.classList.contains('on'))return;
+    if(e.key==='Escape')LB.close();else if(e.key==='ArrowLeft')LB.go(-1);else if(e.key==='ArrowRight')LB.go(1);});
+  // map
+  var geo=P.filter(function(p){return p.lat!=null;}).sort(function(a,b){return a.t-b.t;});
+  if(typeof L!=='undefined'&&geo.length){
+    var map=L.map('map',{scrollWheelZoom:false});
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'}).addTo(map);
+    var pts=geo.map(function(p){return [p.lat,p.lng];});
+    if(pts.length>1)L.polyline(pts,{color:'#2563eb',weight:3,opacity:.65}).addTo(map);
+    geo.forEach(function(p,idx){
+      var m=L.circleMarker([p.lat,p.lng],{radius:6,color:'#fff',weight:2,fillColor:p.fav?'#f43f5e':'#2563eb',fillOpacity:1});
+      m.addTo(map).on('click',function(){LB.open(p.i);});
+      m.bindTooltip('#'+(idx+1)+' '+ftime(p.t),{direction:'top'});
+    });
+    map.fitBounds(L.latLngBounds(pts).pad(0.15));
+  }else{
+    document.getElementById('map').style.display='none';
+    document.getElementById('maphint').textContent=geo.length?'':'위치 정보가 있는 사진이 없습니다.';
+  }
+})();
+<\/script>
+</body></html>`;
 }
 
 /* =========================================================================
@@ -2675,6 +2909,105 @@ function toggleFavoritesFilter() {
   $('favFilterState').className = 'font-semibold ' + (State.favoritesOnly ? 'text-rose-500' : 'text-slate-400');
   renderAll(); updateStatus();
 }
+
+/* =========================================================================
+   Album view — day-by-day photo grid (travel album)
+   ========================================================================= */
+function dayKey(ts) { const d = new Date(ts); d.setHours(0, 0, 0, 0); return +d; }
+function groupByDay(list) {
+  const sorted = list.slice().sort((a, b) => a.timestamp - b.timestamp);
+  const map = new Map();
+  for (const p of sorted) { const k = dayKey(p.timestamp); if (!map.has(k)) map.set(k, []); map.get(k).push(p); }
+  return [...map.entries()].sort((a, b) => a[0] - b[0]);
+}
+// Square center-cropped thumbnail for the grid (nicer than the circular pin).
+async function makeSquareThumb(blob, size = 132) {
+  let src;
+  try { src = await createImageBitmap(blob, { imageOrientation: 'from-image' }); }
+  catch (e) { try { const r = await loadImageEl(blob); src = r.img; } catch (_) { return null; } }
+  const sw = src.width || src.naturalWidth, sh = src.height || src.naturalHeight;
+  if (!sw || !sh) return null;
+  const c = document.createElement('canvas'); c.width = c.height = size;
+  const ctx = c.getContext('2d');
+  const s = Math.min(sw, sh), sx = (sw - s) / 2, sy = (sh - s) / 2;
+  ctx.drawImage(src, sx, sy, s, s, 0, 0, size, size);
+  if (src.close) src.close();
+  return c.toDataURL('image/jpeg', 0.82);
+}
+async function ensureSquareThumbs(list) {
+  const todo = list.filter(p => !p._sq && (p._displayBlob || p._file));
+  for (let i = 0; i < todo.length; i++) {
+    const p = todo[i];
+    const blob = p._displayBlob || (p._file ? await displayBlob(p) : null);
+    if (blob) {
+      p._sq = await makeSquareThumb(blob);
+      if (p._sq && State.albumOpen) { const im = document.querySelector(`#albumBody img[data-id="${p.id}"]`); if (im) im.src = p._sq; }
+    }
+    if (i % 6 === 0) await new Promise(r => setTimeout(r, 0));
+  }
+}
+function dayPlace(photos) { for (const p of photos) { if (p.placeName) return p.placeName; } return ''; }
+async function fillDayPlaces(days) {
+  for (const [dayMs, photos] of days) {
+    if (dayPlace(photos)) continue;
+    const rep = photos.find(p => p.hasGps); if (!rep) continue;
+    const name = await reverseGeocode(rep.correctedGps.lat, rep.correctedGps.lng);
+    if (name) {
+      rep.placeName = name;
+      if (State.albumOpen) { const slot = document.querySelector(`#albumBody section[data-day="${dayMs}"] .day-place`); if (slot) slot.textContent = '📍 ' + name; }
+    }
+    await new Promise(r => setTimeout(r, 1100)); // Nominatim ≤ 1 req/s
+  }
+}
+function renderAlbum() {
+  const body = $('albumBody');
+  const list = State.detailList;
+  if (!list.length) { body.innerHTML = '<div class="text-center text-slate-400 py-16">불러온 사진이 없습니다. 📁 폴더를 선택하세요.</div>'; $('albumSummary').textContent = ''; return; }
+  const days = groupByDay(list);
+  $('albumSummary').textContent = `· ${list.length}장 · ${days.length}일`;
+  const wds = ['일', '월', '화', '수', '목', '금', '토'];
+  const pad = n => String(n).padStart(2, '0');
+  body.innerHTML = days.map(([dayMs, photos], di) => {
+    const d = new Date(dayMs);
+    const place = dayPlace(photos);
+    const cells = photos.map(p => {
+      const src = p._sq || (p.pin ? p.pin.url : '');
+      const fav = (p.attrs && p.attrs.fav) ? '<span class="acell-fav">♥</span>' : '';
+      const tag = p.hasGps ? '' : '<span class="acell-tag">위치없음</span>';
+      return `<div class="album-cell" data-pid="${p.id}"><img data-id="${p.id}" src="${src}" alt="" loading="lazy">${fav}${tag}</div>`;
+    }).join('');
+    return `<section data-day="${dayMs}">` +
+      `<div class="day-head"><span class="day-num">Day ${di + 1}</span>` +
+      `<span class="day-date">${d.getFullYear()}.${pad(d.getMonth() + 1)}.${pad(d.getDate())} (${wds[d.getDay()]})</span>` +
+      `<span class="day-place">${place ? '📍 ' + place : ''}</span>` +
+      `<span class="day-count">${photos.length}장</span></div>` +
+      `<div class="album-grid">${cells}</div></section>`;
+  }).join('');
+  body.onclick = (e) => {
+    const cell = e.target.closest('.album-cell'); if (!cell) return;
+    const p = State.detailList.find(x => x.id === cell.dataset.pid); if (!p) return;
+    closeAlbum(); openDetailFromAlbum(p);
+  };
+  ensureSquareThumbs(list);
+  fillDayPlaces(days);
+}
+function openDetailFromAlbum(p) {
+  openDetail(p);
+  if (p.hasGps && adapter().ready) adapter().panTo(p.correctedGps);
+}
+function openAlbum() {
+  if (!State.photos.length) { alert('먼저 사진을 불러오세요.'); return; }
+  State.albumOpen = true;
+  $('albumPanel').classList.remove('hidden');
+  $('albumBtn').classList.add('bg-blue-600', 'text-white', 'border-blue-600');
+  renderAlbum();
+}
+function closeAlbum() {
+  State.albumOpen = false;
+  $('albumPanel').classList.add('hidden');
+  $('albumBtn').classList.remove('bg-blue-600', 'text-white', 'border-blue-600');
+}
+function toggleAlbum() { State.albumOpen ? closeAlbum() : openAlbum(); }
 
 /* ---------- Splitter (drag to resize map / detail pane) ---------- */
 let mapResizeTimer = null;
@@ -2747,6 +3080,10 @@ function init() {
 
   // Favourites filter
   $('favFilterBtn').addEventListener('click', toggleFavoritesFilter);
+
+  // Album (day-by-day photo grid)
+  $('albumBtn').addEventListener('click', toggleAlbum);
+  $('albumClose').addEventListener('click', closeAlbum);
 
   // Project save / load / re-attach originals
   $('saveProjectBtn').addEventListener('click', saveProject);
