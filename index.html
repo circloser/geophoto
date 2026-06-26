@@ -219,12 +219,12 @@
     <div class="dd" id="ddLoad">
       <button type="button" class="dd-btn">📥 <span class="hidden sm:inline">불러오기</span> <span class="dd-caret">▾</span></button>
       <div class="dd-panel dd-form">
-        <label class="dd-item cursor-pointer" title="폴더 대신 개별 이미지 파일 선택">
+        <label class="dd-item dd-close cursor-pointer" title="폴더 대신 개별 이미지 파일 선택">
           🖼️ <span>개별 파일 선택</span>
           <input id="filesInput" type="file" accept="image/*" multiple class="hidden" />
         </label>
-        <button id="trackBtn" type="button" class="dd-item" title="GPX 트랙으로 GPS 없는 사진에 좌표 부여">🛰 <span>GPX 트랙으로 좌표 부여</span></button>
-        <button id="openProjectBtn" type="button" class="dd-item" title="저장한 프로젝트 불러오기">📂 <span>프로젝트 열기</span></button>
+        <button id="trackBtn" type="button" class="dd-item dd-close" title="GPX 트랙으로 GPS 없는 사진에 좌표 부여">🛰 <span>GPX 트랙으로 좌표 부여</span></button>
+        <button id="openProjectBtn" type="button" class="dd-item dd-close" title="저장한 프로젝트 불러오기">📂 <span>프로젝트 열기</span></button>
       </div>
     </div>
 
@@ -275,11 +275,11 @@
     <div class="dd" id="ddTools">
       <button type="button" class="dd-btn">🧰 <span class="hidden sm:inline">도구</span> <span class="dd-dot"></span><span class="dd-caret">▾</span></button>
       <div class="dd-panel dd-form">
-        <button id="geocodeBtn" type="button" class="dd-item" title="보이는 사진의 좌표로 지명 자동 채우기 (OpenStreetMap Nominatim)">🏷 <span>지명 자동 채우기</span></button>
+        <button id="geocodeBtn" type="button" class="dd-item dd-close" title="보이는 사진의 좌표로 지명 자동 채우기 (OpenStreetMap Nominatim)">🏷 <span>지명 자동 채우기</span></button>
         <button id="favFilterBtn" type="button" class="dd-item between" title="즐겨찾기한 사진만 보기">♥ 즐겨찾기만 보기 <span id="favFilterState" class="font-semibold text-slate-400">OFF</span></button>
         <button id="compareBtn" type="button" class="dd-item between" title="두 사진을 좌우로 비교">⚖ 비교 모드 <span id="compareState" class="font-semibold text-slate-400">OFF</span></button>
         <div class="dd-sep"></div>
-        <button id="fitAllBtn" type="button" class="dd-item" title="모든 사진이 보이도록 맞춤">⊡ <span>전체 보기</span></button>
+        <button id="fitAllBtn" type="button" class="dd-item dd-close" title="모든 사진이 보이도록 맞춤">⊡ <span>전체 보기</span></button>
         <span id="clusterNav" class="hidden items-center gap-1">
           <button id="clusterPrev" class="px-2 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50" title="이전 군집">◀</button>
           <select id="clusterSelect" class="dd-select flex-1" title="군집으로 이동"></select>
@@ -2413,20 +2413,27 @@ function updateCadastralButton() {
    active state stays visible while the menu is collapsed). */
 function initDropdowns() {
   const dds = [...document.querySelectorAll('.dd')];
+  const closeAll = () => dds.forEach(d => d.classList.remove('open'));
   dds.forEach(dd => {
     const btn = dd.querySelector('.dd-btn');
     if (!btn) return;
-    btn.addEventListener('click', e => {
-      e.stopPropagation();
+    btn.addEventListener('click', () => {
       const open = dd.classList.contains('open');
-      dds.forEach(d => d.classList.remove('open'));
+      closeAll();
       if (!open) dd.classList.add('open');
     });
-    const panel = dd.querySelector('.dd-panel');
-    if (panel) panel.addEventListener('click', e => e.stopPropagation()); // keep open while using controls
+    // One-shot actions (file pick, modal, navigation) dismiss the menu after running.
+    dd.querySelectorAll('.dd-close').forEach(el => el.addEventListener('click', closeAll));
   });
-  document.addEventListener('click', () => dds.forEach(d => d.classList.remove('open')));
-  document.addEventListener('keydown', e => { if (e.key === 'Escape') dds.forEach(d => d.classList.remove('open')); });
+  // Capture phase: map SDKs (Leaflet/Google/Naver/Kakao) call stopPropagation on
+  // their own click events, so a bubble-phase listener never fires when the user
+  // clicks the map to dismiss. Capturing runs first and is reliable. Clicks on a
+  // trigger or inside a panel are skipped here (handled by their own listeners).
+  document.addEventListener('click', (e) => {
+    if (e.target.closest && e.target.closest('.dd')) return;
+    closeAll();
+  }, true);
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeAll(); });
 }
 function updateMenuDots() {
   const set = (id, on) => { const el = document.getElementById(id); if (el) el.classList.toggle('has-active', !!on); };
