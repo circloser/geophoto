@@ -53,10 +53,12 @@
   .dd-caret { font-size: 10px; color: #94a3b8; }
   .dd-dot { width: 7px; height: 7px; border-radius: 50%; background: #2563eb; display: none; }
   .dd.has-active .dd-dot { display: inline-block; }
-  .dd-panel { position: absolute; top: calc(100% + 5px); left: 0; min-width: 214px; background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 10px 30px rgba(2,6,23,.16); padding: 8px; z-index: 60; display: none; }
-  .dd.open .dd-panel { display: block; }
+  /* Hidden by default; shown only when the menu is open. flex-direction/gap live
+     on .dd-panel itself (inert until display:flex) so no other class can win the
+     display battle by specificity/order and leave the panel stuck visible. */
+  .dd-panel { position: absolute; top: calc(100% + 5px); left: 0; min-width: 214px; background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 10px 30px rgba(2,6,23,.16); padding: 8px; z-index: 60; display: none; flex-direction: column; gap: 7px; }
+  .dd.open .dd-panel { display: flex; }
   .dd-panel.dd-right { left: auto; right: 0; }
-  .dd-form { display: flex; flex-direction: column; gap: 7px; }
   .dd-label { font-size: 11px; font-weight: 600; color: #94a3b8; margin: 3px 2px -3px; }
   .dd-select { width: 100%; font-size: 13px; border: 1px solid #cbd5e1; border-radius: 7px; padding: 6px 8px; background: #fff; color: #334155; }
   .dd-item { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; font-size: 13px; padding: 7px 9px; border-radius: 8px; border: 1px solid transparent; background: #fff; color: #334155; cursor: pointer; }
