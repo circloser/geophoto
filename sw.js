@@ -2,13 +2,14 @@
    Caches the app shell + CDN libraries (so the page opens offline) and runtime-
    caches map tiles as they are viewed, so areas you've already browsed stay
    available without a connection. */
-const APP_CACHE = 'geophoto-app-v14';
+const APP_CACHE = 'geophoto-app-v15';
 const TILE_CACHE = 'geophoto-tiles-v1';
 
 const APP_ASSETS = [
   './',
   './index.html',
   './manifest.webmanifest',
+  './favicon.svg',
   'https://cdn.tailwindcss.com',
   'https://cdn.jsdelivr.net/npm/exifr/dist/full.umd.js',
   'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js',
