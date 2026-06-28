@@ -3388,6 +3388,101 @@ function openDashboard() { const m = $('statsModal'); renderDashboard(); m.class
 function closeDashboard() { const m = $('statsModal'); m.classList.add('hidden'); m.classList.remove('flex'); }
 
 /* =========================================================================
+   Route animation — "trip replay". A marker travels the time-sorted path with
+   a thumbnail popping up at each photo. Provider-agnostic: the marker is a DOM
+   overlay positioned via the adapter's projectPixel() (same trick as the heat
+   layer), so it works on OpenStreetMap / Google / Naver / Kakao alike.
+   ========================================================================= */
+const RoutePlay = (() => {
+  const SEG_MS = 900, DWELL_MS = 350, SPEEDS = [1, 2, 4];
+  let ui = null, marker = null, popup = null, thumb = null, cap = null, progressEl = null, dateEl = null, toggleEl = null, speedEl = null;
+  let timer = 0, playing = false, speed = 1, geo = [], idx = 0, segT = 0, lastTs = 0, dwell = 0;
+
+  function ensureUI() {
+    if (ui) return;
+    const wrap = document.getElementById('map').parentElement;
+    ui = document.createElement('div');
+    ui.id = 'playOverlay';
+    ui.style.cssText = 'position:absolute;inset:0;z-index:40;pointer-events:none;display:none;';
+    ui.innerHTML =
+      '<div id="playMarker" style="position:absolute;left:0;top:0;width:18px;height:18px;margin:-9px 0 0 -9px;border-radius:50%;background:#2563eb;box-shadow:0 0 0 4px rgba(37,99,235,.3),0 1px 5px rgba(0,0,0,.5);transition:left .05s linear,top .05s linear;"></div>' +
+      '<div id="playPopup" style="position:absolute;left:0;top:0;transform:translate(-50%,calc(-100% - 16px));display:none;">' +
+        '<div style="background:#fff;border-radius:10px;box-shadow:0 4px 16px rgba(0,0,0,.28);overflow:hidden;width:104px;">' +
+          '<img id="playThumb" alt="" style="width:104px;height:104px;object-fit:cover;display:block;background:#e2e8f0;">' +
+          '<div id="playCap" style="font-size:10px;color:#475569;padding:3px 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>' +
+        '</div></div>' +
+      '<div style="position:absolute;left:50%;bottom:16px;transform:translateX(-50%);pointer-events:auto;display:flex;align-items:center;gap:10px;background:rgba(15,23,42,.86);color:#fff;border-radius:999px;padding:7px 14px;font-size:13px;box-shadow:0 4px 16px rgba(0,0,0,.3);white-space:nowrap;">' +
+        '<button id="playToggle" title="재생/일시정지" style="font-size:15px;background:none;border:none;color:#fff;cursor:pointer;line-height:1;">⏸</button>' +
+        '<span id="playProgress" style="min-width:52px;text-align:center;font-variant-numeric:tabular-nums;"></span>' +
+        '<span id="playDate" style="opacity:.85;font-size:12px;"></span>' +
+        '<button id="playSpeed" style="background:rgba(255,255,255,.16);border:none;color:#fff;border-radius:8px;padding:2px 9px;cursor:pointer;font-size:12px;">1×</button>' +
+        '<button id="playExit" title="닫기" style="background:none;border:none;color:#fff;cursor:pointer;font-size:16px;line-height:1;">✕</button>' +
+      '</div>';
+    wrap.appendChild(ui);
+    marker = ui.querySelector('#playMarker'); popup = ui.querySelector('#playPopup');
+    thumb = ui.querySelector('#playThumb'); cap = ui.querySelector('#playCap');
+    progressEl = ui.querySelector('#playProgress'); dateEl = ui.querySelector('#playDate');
+    toggleEl = ui.querySelector('#playToggle'); speedEl = ui.querySelector('#playSpeed');
+    toggleEl.addEventListener('click', toggle);
+    ui.querySelector('#playExit').addEventListener('click', stop);
+    speedEl.addEventListener('click', () => { speed = SPEEDS[(SPEEDS.indexOf(speed) + 1) % SPEEDS.length]; speedEl.textContent = speed + '×'; });
+  }
+  function place(latlng) {
+    const a = adapter(); let p = null;
+    try { p = a.projectPixel ? a.projectPixel(latlng) : null; } catch (e) {}
+    if (!p || !isFinite(p.x) || !isFinite(p.y)) { marker.style.display = 'none'; popup.style.display = 'none'; return; }
+    marker.style.display = 'block';
+    marker.style.left = p.x + 'px'; marker.style.top = p.y + 'px';
+    popup.style.left = p.x + 'px'; popup.style.top = p.y + 'px';
+  }
+  function showPhoto(p) {
+    popup.style.display = 'block';
+    thumb.src = p._sq || (p.pin && p.pin.url) || '';
+    const d = new Date(p.timestamp), pad = n => String(n).padStart(2, '0');
+    cap.textContent = (p.placeName ? p.placeName + ' · ' : '') + pad(d.getHours()) + ':' + pad(d.getMinutes());
+    progressEl.textContent = (idx + 1) + ' / ' + geo.length;
+    dateEl.textContent = `${d.getFullYear()}.${pad(d.getMonth() + 1)}.${pad(d.getDate())}`;
+  }
+  // Timer-driven (not rAF) so playback keeps progressing even if the tab loses
+  // focus; elapsed-time math keeps motion smooth, and dt is clamped so a throttle
+  // pause doesn't make the marker leap.
+  function startTimer() { stopTimer(); lastTs = 0; timer = setInterval(frame, 33); }
+  function stopTimer() { if (timer) { clearInterval(timer); timer = 0; } }
+  function frame() {
+    if (!playing) return;
+    const ts = performance.now();
+    if (!lastTs) lastTs = ts;
+    let dt = ts - lastTs; lastTs = ts;
+    if (dt > 200) dt = 200;
+    if (dwell > 0) { dwell -= dt; place(geo[idx].correctedGps); return; }
+    if (idx >= geo.length - 1) { stopAtEnd(); return; }
+    segT += (dt * speed) / SEG_MS;
+    if (segT >= 1) { segT = 0; idx++; showPhoto(geo[idx]); place(geo[idx].correctedGps); dwell = DWELL_MS; return; }
+    const a = geo[idx].correctedGps, b = geo[idx + 1].correctedGps;
+    place({ lat: a.lat + (b.lat - a.lat) * segT, lng: a.lng + (b.lng - a.lng) * segT });
+  }
+  function toggle() { playing ? pause() : resume(); }
+  function pause() { playing = false; stopTimer(); if (toggleEl) toggleEl.textContent = '▶'; }
+  function resume() { if (idx >= geo.length - 1) { idx = 0; segT = 0; showPhoto(geo[0]); } playing = true; if (toggleEl) toggleEl.textContent = '⏸'; startTimer(); }
+  function stopAtEnd() { playing = false; stopTimer(); if (toggleEl) toggleEl.textContent = '↻'; place(geo[geo.length - 1].correctedGps); }
+  function start() {
+    geo = (State.geo || []).slice().sort((a, b) => a.timestamp - b.timestamp);
+    if (geo.length < 2) { alert(t('route.empty')); return; }
+    ensureUI();
+    if (typeof ensureSquareThumbs === 'function') { try { ensureSquareThumbs(geo); } catch (e) {} }
+    const a = adapter();
+    try { if (a.ready && a.fitTo) a.fitTo(geo.map(p => p.correctedGps)); } catch (e) {}
+    ui.style.display = 'block';
+    idx = 0; segT = 0; dwell = 0; playing = true; if (toggleEl) toggleEl.textContent = '⏸';
+    showPhoto(geo[0]); place(geo[0].correctedGps);
+    setTimeout(() => { if (ui && ui.style.display !== 'none') place(geo[idx].correctedGps); }, 360);
+    startTimer();
+  }
+  function stop() { playing = false; stopTimer(); if (ui) ui.style.display = 'none'; }
+  return { start, stop, _state: () => ({ idx, playing, len: geo.length, speed }) };
+})();
+
+/* =========================================================================
    Event wiring
    ========================================================================= */
 function $(id) { return document.getElementById(id); }
@@ -3441,6 +3536,9 @@ function init() {
   $('statsBtn').addEventListener('click', openDashboard);
   $('statsClose').addEventListener('click', closeDashboard);
   $('statsModal').addEventListener('click', e => { if (e.target.id === 'statsModal') closeDashboard(); });
+
+  // Route animation playback ("trip replay")
+  $('playBtn').addEventListener('click', () => RoutePlay.start());
 
   // Project save / load / re-attach originals
   $('saveProjectBtn').addEventListener('click', saveProject);
