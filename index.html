@@ -16,6 +16,7 @@
 <style>
   html, body { height: 100%; margin: 0; }
   #app { height: 100vh; display: flex; flex-direction: column; }
+  #overlay { transition: opacity .6s ease; }
   /* z-index:0 makes #map an isolated stacking context so the map library's internal
      panes/controls (Leaflet uses up to ~1000) cannot paint over the toolbar,
      overlays, or the settings modal. */
@@ -2242,11 +2243,25 @@ function showLoading(on, text) {
   if (text) setLoadingText(text);
 }
 function setLoadingText(t) { document.getElementById('loadingText').textContent = t; }
+let overlayIsMessage = false; // true once setOverlay shows a real info/error message
 function setOverlay(msg) {
-  document.getElementById('overlay').style.display = 'flex';
+  overlayIsMessage = true; // not the first-run welcome — keep it visible (don't auto-dismiss)
+  const ov = document.getElementById('overlay');
+  ov.style.display = 'flex'; ov.style.opacity = '1';
   document.getElementById('overlayMsg').textContent = msg;
 }
-function hideOverlay() { document.getElementById('overlay').style.display = 'none'; }
+function hideOverlay() { const ov = document.getElementById('overlay'); ov.style.display = 'none'; ov.style.opacity = '1'; }
+// Auto-dismiss the initial welcome card after a few seconds so it doesn't cover
+// the map. Only the first-run welcome fades; messages from setOverlay stay put.
+function dismissWelcome() {
+  const ov = document.getElementById('overlay');
+  if (!ov || overlayIsMessage || State.geo.length || ov.style.display === 'none') return;
+  ov.style.opacity = '0';
+  setTimeout(() => {
+    if (!overlayIsMessage && !State.geo.length) ov.style.display = 'none';
+    ov.style.opacity = '1';
+  }, 600);
+}
 
 function updateStatus(correctedCount, extra) {
   const s = document.getElementById('status');
@@ -3199,6 +3214,7 @@ function $(id) { return document.getElementById(id); }
 function init() {
   loadSettings();
   initExifWorker();
+  setTimeout(dismissWelcome, 10000); // first-run welcome card auto-hides after 10s
   State.provider = 'osm';
   $('providerSelect').value = State.provider;
   $('mapTypeSelect').value = State.mapType;
