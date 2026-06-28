@@ -216,20 +216,20 @@
 
     <!-- Primary action -->
     <label class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-md cursor-pointer">
-      📁 <span>폴더 선택</span>
+      📁 <span data-i18n="btn.folder">폴더 선택</span>
       <input id="folderInput" type="file" accept="image/*" multiple webkitdirectory directory class="hidden" />
     </label>
 
     <!-- 불러오기 (개별 파일 / GPX 트랙 / 프로젝트 열기) -->
     <div class="dd" id="ddLoad">
-      <button type="button" class="dd-btn">📥 <span class="hidden sm:inline">불러오기</span> <span class="dd-caret">▾</span></button>
+      <button type="button" class="dd-btn">📥 <span class="hidden sm:inline" data-i18n="menu.load">불러오기</span> <span class="dd-caret">▾</span></button>
       <div class="dd-panel dd-form">
         <label class="dd-item dd-close cursor-pointer" title="폴더 대신 개별 이미지 파일 선택">
-          🖼️ <span>개별 파일 선택</span>
+          🖼️ <span data-i18n="load.files">개별 파일 선택</span>
           <input id="filesInput" type="file" accept="image/*" multiple class="hidden" />
         </label>
-        <button id="trackBtn" type="button" class="dd-item dd-close" title="GPX 트랙으로 GPS 없는 사진에 좌표 부여">🛰 <span>GPX 트랙으로 좌표 부여</span></button>
-        <button id="openProjectBtn" type="button" class="dd-item dd-close" title="저장한 프로젝트 불러오기">📂 <span>프로젝트 열기</span></button>
+        <button id="trackBtn" type="button" class="dd-item dd-close" title="GPX 트랙으로 GPS 없는 사진에 좌표 부여">🛰 <span data-i18n="load.track">GPX 트랙으로 좌표 부여</span></button>
+        <button id="openProjectBtn" type="button" class="dd-item dd-close" title="저장한 프로젝트 불러오기">📂 <span data-i18n="load.project">프로젝트 열기</span></button>
       </div>
     </div>
 
@@ -237,54 +237,54 @@
 
     <!-- 지도 (제공자 / 종류 / 지적도) -->
     <div class="dd" id="ddMap">
-      <button type="button" class="dd-btn">🗺 <span class="hidden sm:inline">지도</span> <span class="dd-dot"></span><span class="dd-caret">▾</span></button>
+      <button type="button" class="dd-btn">🗺 <span class="hidden sm:inline" data-i18n="menu.map">지도</span> <span class="dd-dot"></span><span class="dd-caret">▾</span></button>
       <div class="dd-panel dd-form">
-        <label class="dd-label">지도 제공자</label>
+        <label class="dd-label" data-i18n="map.provider">지도 제공자</label>
         <select id="providerSelect" class="dd-select">
           <option value="osm">OpenStreetMap (키 불필요)</option>
           <option value="google">Google Maps</option>
           <option value="naver">Naver Maps</option>
           <option value="kakao">Kakao Maps</option>
         </select>
-        <label class="dd-label">지도 종류</label>
+        <label class="dd-label" data-i18n="map.type">지도 종류</label>
         <select id="mapTypeSelect" class="dd-select">
-          <option value="roadmap">일반</option>
-          <option value="satellite">위성</option>
-          <option value="hybrid">하이브리드</option>
+          <option value="roadmap" data-i18n="opt.roadmap">일반</option>
+          <option value="satellite" data-i18n="opt.satellite">위성</option>
+          <option value="hybrid" data-i18n="opt.hybrid">하이브리드</option>
         </select>
-        <button id="cadastralBtn" type="button" class="dd-item between disabled:opacity-40" title="지적편집도 (네이버/카카오 전용)">🗺 지적편집도 <span id="cadastralState" class="font-semibold text-slate-400">OFF</span></button>
+        <button id="cadastralBtn" type="button" class="dd-item between disabled:opacity-40" title="지적편집도 (네이버/카카오 전용)">🗺 <span data-i18n="map.cadastral">지적편집도</span> <span id="cadastralState" class="font-semibold text-slate-400">OFF</span></button>
       </div>
     </div>
 
     <!-- 보기 (썸네일 / 표시 방식 / 경로 / 화각) -->
     <div class="dd" id="ddView">
-      <button type="button" class="dd-btn">👁 <span class="hidden sm:inline">보기</span> <span class="dd-dot"></span><span class="dd-caret">▾</span></button>
+      <button type="button" class="dd-btn">👁 <span class="hidden sm:inline" data-i18n="menu.view">보기</span> <span class="dd-dot"></span><span class="dd-caret">▾</span></button>
       <div class="dd-panel dd-form">
-        <button id="thumbToggle" type="button" class="dd-item between">🖼 썸네일 <span id="thumbState" class="font-semibold text-blue-600">ON</span></button>
-        <label class="dd-label">밀집 표시 (썸네일 OFF 시)</label>
+        <button id="thumbToggle" type="button" class="dd-item between">🖼 <span data-i18n="view.thumb">썸네일</span> <span id="thumbState" class="font-semibold text-blue-600">ON</span></button>
+        <label class="dd-label" data-i18n="view.density">밀집 표시 (썸네일 OFF 시)</label>
         <select id="modeSelect" class="dd-select" title="썸네일 OFF / 밀집 시 표시 방식">
-          <option value="dot">점 (Dot)</option>
-          <option value="heat">점구름 (Heatmap)</option>
+          <option value="dot" data-i18n="opt.dot">점 (Dot)</option>
+          <option value="heat" data-i18n="opt.heat">점구름 (Heatmap)</option>
         </select>
-        <label class="dd-label">이동 경로</label>
+        <label class="dd-label" data-i18n="view.path">이동 경로</label>
         <select id="pathSelect" class="dd-select" title="이동 경로 선">
-          <option value="corrected">보정 좌표</option>
-          <option value="original">원본 좌표</option>
-          <option value="off">끄기</option>
+          <option value="corrected" data-i18n="opt.pathCorrected">보정 좌표</option>
+          <option value="original" data-i18n="opt.pathOriginal">원본 좌표</option>
+          <option value="off" data-i18n="opt.pathOff">끄기</option>
         </select>
-        <button id="fovBtn" type="button" class="dd-item between" title="촬영 방향/화각을 삼각형으로 표시">📐 화각 표시 <span id="fovState" class="font-semibold text-slate-400">OFF</span></button>
+        <button id="fovBtn" type="button" class="dd-item between" title="촬영 방향/화각을 삼각형으로 표시">📐 <span data-i18n="view.fov">화각 표시</span> <span id="fovState" class="font-semibold text-slate-400">OFF</span></button>
       </div>
     </div>
 
     <!-- 도구 (지명 채우기 / 즐겨찾기 / 비교 / 군집 이동) -->
     <div class="dd" id="ddTools">
-      <button type="button" class="dd-btn">🧰 <span class="hidden sm:inline">도구</span> <span class="dd-dot"></span><span class="dd-caret">▾</span></button>
+      <button type="button" class="dd-btn">🧰 <span class="hidden sm:inline" data-i18n="menu.tools">도구</span> <span class="dd-dot"></span><span class="dd-caret">▾</span></button>
       <div class="dd-panel dd-form">
-        <button id="geocodeBtn" type="button" class="dd-item dd-close" title="보이는 사진의 좌표로 지명 자동 채우기 (OpenStreetMap Nominatim)">🏷 <span>지명 자동 채우기</span></button>
-        <button id="favFilterBtn" type="button" class="dd-item between" title="즐겨찾기한 사진만 보기">♥ 즐겨찾기만 보기 <span id="favFilterState" class="font-semibold text-slate-400">OFF</span></button>
-        <button id="compareBtn" type="button" class="dd-item between" title="두 사진을 좌우로 비교">⚖ 비교 모드 <span id="compareState" class="font-semibold text-slate-400">OFF</span></button>
+        <button id="geocodeBtn" type="button" class="dd-item dd-close" title="보이는 사진의 좌표로 지명 자동 채우기 (OpenStreetMap Nominatim)">🏷 <span data-i18n="tools.geocode">지명 자동 채우기</span></button>
+        <button id="favFilterBtn" type="button" class="dd-item between" title="즐겨찾기한 사진만 보기">♥ <span data-i18n="tools.fav">즐겨찾기만 보기</span> <span id="favFilterState" class="font-semibold text-slate-400">OFF</span></button>
+        <button id="compareBtn" type="button" class="dd-item between" title="두 사진을 좌우로 비교">⚖ <span data-i18n="tools.compare">비교 모드</span> <span id="compareState" class="font-semibold text-slate-400">OFF</span></button>
         <div class="dd-sep"></div>
-        <button id="fitAllBtn" type="button" class="dd-item dd-close" title="모든 사진이 보이도록 맞춤">⊡ <span>전체 보기</span></button>
+        <button id="fitAllBtn" type="button" class="dd-item dd-close" title="모든 사진이 보이도록 맞춤">⊡ <span data-i18n="tools.fitAll">전체 보기</span></button>
         <span id="clusterNav" class="hidden items-center gap-1">
           <button id="clusterPrev" class="px-2 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50" title="이전 군집">◀</button>
           <select id="clusterSelect" class="dd-select flex-1" title="군집으로 이동"></select>
@@ -303,7 +303,7 @@
     <button id="playBtn" class="px-3 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50" title="여행 경로 애니메이션 재생">▶ <span class="hidden sm:inline" data-i18n="btn.play">재생</span></button>
 
     <select id="exportSelect" class="text-sm border border-slate-300 rounded-md px-2 py-1.5 bg-white" title="데이터/앨범 내보내기">
-      <option value="">⬇ 내보내기</option>
+      <option value="" data-i18n="export.label">⬇ 내보내기</option>
       <option value="geojson">GeoJSON (.geojson)</option>
       <option value="kml">KML (.kml)</option>
       <option value="csv">CSV (.csv)</option>
@@ -312,13 +312,15 @@
       <option value="album">📔 공유용 여행 앨범 (.html)</option>
     </select>
 
-    <button id="saveProjectBtn" class="px-3 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50" title="현재 작업(좌표·보정·메모·즐겨찾기)을 파일로 저장">💾 <span class="hidden sm:inline">저장</span></button>
+    <button id="saveProjectBtn" class="px-3 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50" title="현재 작업(좌표·보정·메모·즐겨찾기)을 파일로 저장">💾 <span class="hidden sm:inline" data-i18n="btn.save">저장</span></button>
     <input id="projectInput" type="file" accept=".json,.geophoto,application/json" class="hidden" />
     <input id="reattachInput" type="file" accept="image/*" multiple webkitdirectory directory class="hidden" />
 
-    <button id="settingsBtn" class="px-3 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50">⚙️ <span class="hidden sm:inline">설정</span></button>
+    <button id="settingsBtn" class="px-3 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50">⚙️ <span class="hidden sm:inline" data-i18n="btn.settings">설정</span></button>
 
-    <span id="netBadge" class="ml-auto inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-emerald-100 text-emerald-700" title="네트워크 상태">● 온라인</span>
+    <button id="langBtn" class="ml-auto px-2.5 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50" title="Language / 언어">🌐 <span data-i18n="lang.name">EN</span></button>
+
+    <span id="netBadge" class="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-emerald-100 text-emerald-700" title="네트워크 상태">● 온라인</span>
     <div id="status" class="text-xs text-slate-500 leading-tight text-right"></div>
   </header>
 
@@ -348,8 +350,8 @@
       <div id="overlay" class="absolute inset-0 flex items-center justify-center pointer-events-none">
         <div id="overlayBox" class="pointer-events-auto bg-white/95 backdrop-blur rounded-xl shadow-lg px-8 py-6 max-w-md text-center">
           <div class="text-4xl mb-3">🗺️📸</div>
-          <h2 class="text-lg font-bold text-slate-700 mb-1">사진으로 떠나는 지도 여행</h2>
-          <p id="overlayMsg" class="text-sm text-slate-500">📁 폴더를 선택하면 사진이 찍힌 곳을 지도 위에 모아 보여드려요.<br/>여행 기록도, 현장 조사도 — 키 없이 바로 시작! (기본 지도: OpenStreetMap)</p>
+          <h2 class="text-lg font-bold text-slate-700 mb-1" data-i18n="overlay.title">사진으로 떠나는 지도 여행</h2>
+          <p id="overlayMsg" data-i18n="overlay.msg" class="text-sm text-slate-500">📁 폴더를 선택하면 사진이 찍힌 곳을 지도 위에 모아 보여드려요.<br/>여행 기록도, 현장 조사도 — 키 없이 바로 시작! (기본 지도: OpenStreetMap)</p>
         </div>
       </div>
 
@@ -370,8 +372,8 @@
       <!-- Album (day-by-day photo grid) overlay -->
       <div id="albumPanel" class="hidden absolute inset-0 z-30 bg-slate-50 overflow-auto">
         <div class="sticky top-0 z-10 flex items-center justify-between px-4 py-2.5 bg-white/95 backdrop-blur border-b border-slate-200">
-          <div class="font-bold text-slate-700">📔 여행 앨범 <span id="albumSummary" class="text-xs font-normal text-slate-400 ml-1"></span></div>
-          <button id="albumClose" class="dctl">🗺 지도로</button>
+          <div class="font-bold text-slate-700">📔 <span data-i18n="album.title">여행 앨범</span> <span id="albumSummary" class="text-xs font-normal text-slate-400 ml-1"></span></div>
+          <button id="albumClose" class="dctl"><span data-i18n="album.toMap">🗺 지도로</span></button>
         </div>
         <div id="albumBody" class="p-3 sm:p-4 space-y-7"></div>
       </div>
@@ -756,6 +758,14 @@ const I18N = {
     'stats.unitShots': '장', 'stats.empty': '사진을 먼저 불러오세요.', 'stats.peakHour': '최다 시간대',
     'route.title': '여행 다시보기', 'route.play': '재생', 'route.pause': '일시정지', 'route.replay': '다시 재생',
     'route.speed': '속도', 'route.exit': '닫기', 'route.empty': 'GPS 사진이 2장 이상 있어야 재생할 수 있어요.',
+    'btn.folder': '폴더 선택', 'lang.name': 'EN',
+    'overlay.title': '사진으로 떠나는 지도 여행',
+    'overlay.msg': '📁 폴더를 선택하면 사진이 찍힌 곳을 지도 위에 모아 보여드려요. 여행 기록도, 현장 조사도 — 키 없이 바로 시작! (기본 지도: OpenStreetMap)',
+    'album.title': '여행 앨범', 'album.toMap': '🗺 지도로', 'album.empty': '불러온 사진이 없습니다. 📁 폴더를 선택하세요.',
+    'album.day': 'Day', 'unit.shots': '장', 'unit.days': '일',
+    'opt.roadmap': '일반', 'opt.satellite': '위성', 'opt.hybrid': '하이브리드',
+    'opt.dot': '점 (Dot)', 'opt.heat': '점구름 (Heatmap)',
+    'opt.pathCorrected': '보정 좌표', 'opt.pathOriginal': '원본 좌표', 'opt.pathOff': '끄기',
   },
   en: {
     'app.tagline': 'A map journey through your photos',
@@ -774,6 +784,14 @@ const I18N = {
     'stats.unitShots': 'shots', 'stats.empty': 'Load some photos first.', 'stats.peakHour': 'Peak hour',
     'route.title': 'Trip replay', 'route.play': 'Play', 'route.pause': 'Pause', 'route.replay': 'Replay',
     'route.speed': 'Speed', 'route.exit': 'Close', 'route.empty': 'Need at least 2 geotagged photos to replay.',
+    'btn.folder': 'Open folder', 'lang.name': '한',
+    'overlay.title': 'A map journey through your photos',
+    'overlay.msg': '📁 Pick a folder and we will map where each photo was taken. Travel logs or field surveys — start instantly, no API key. (Default map: OpenStreetMap)',
+    'album.title': 'Travel album', 'album.toMap': '🗺 Map', 'album.empty': 'No photos loaded. 📁 Choose a folder.',
+    'album.day': 'Day', 'unit.shots': 'shots', 'unit.days': 'days',
+    'opt.roadmap': 'Road', 'opt.satellite': 'Satellite', 'opt.hybrid': 'Hybrid',
+    'opt.dot': 'Dot', 'opt.heat': 'Heatmap',
+    'opt.pathCorrected': 'Corrected', 'opt.pathOriginal': 'Original', 'opt.pathOff': 'Off',
   },
 };
 let LANG = (() => { try { return localStorage.getItem('geophoto.lang') || 'ko'; } catch (e) { return 'ko'; } })();
@@ -2324,7 +2342,9 @@ function setOverlay(msg) {
   overlayIsMessage = true; // not the first-run welcome — keep it visible (don't auto-dismiss)
   const ov = document.getElementById('overlay');
   ov.style.display = 'flex'; ov.style.opacity = '1';
-  document.getElementById('overlayMsg').textContent = msg;
+  const m = document.getElementById('overlayMsg');
+  m.removeAttribute('data-i18n'); // this is an error/info message — don't let applyLang() overwrite it
+  m.textContent = msg;
 }
 function hideOverlay() { const ov = document.getElementById('overlay'); ov.style.display = 'none'; ov.style.opacity = '1'; }
 // Auto-dismiss the initial welcome card after a few seconds so it doesn't cover
@@ -3207,10 +3227,14 @@ async function fillDayPlaces(days) {
 function renderAlbum() {
   const body = $('albumBody');
   const list = State.detailList;
-  if (!list.length) { body.innerHTML = '<div class="text-center text-slate-400 py-16">불러온 사진이 없습니다. 📁 폴더를 선택하세요.</div>'; $('albumSummary').textContent = ''; return; }
+  if (!list.length) { body.innerHTML = `<div class="text-center text-slate-400 py-16">${t('album.empty')}</div>`; $('albumSummary').textContent = ''; return; }
   const days = groupByDay(list);
-  $('albumSummary').textContent = `· ${list.length}장 · ${days.length}일`;
-  const wds = ['일', '월', '화', '수', '목', '금', '토'];
+  const en = LANG === 'en';
+  const shotsU = (en ? ' ' : '') + t('unit.shots');
+  const daysU = (en ? ' ' : '') + t('unit.days');
+  const wds = en ? ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] : ['일', '월', '화', '수', '목', '금', '토'];
+  const noloc = en ? 'no GPS' : '위치없음';
+  $('albumSummary').textContent = `· ${list.length}${shotsU} · ${days.length}${daysU}`;
   const pad = n => String(n).padStart(2, '0');
   body.innerHTML = days.map(([dayMs, photos], di) => {
     const d = new Date(dayMs);
@@ -3218,14 +3242,14 @@ function renderAlbum() {
     const cells = photos.map(p => {
       const src = p._sq || (p.pin ? p.pin.url : '');
       const fav = (p.attrs && p.attrs.fav) ? '<span class="acell-fav">♥</span>' : '';
-      const tag = p.hasGps ? '' : '<span class="acell-tag">위치없음</span>';
+      const tag = p.hasGps ? '' : `<span class="acell-tag">${noloc}</span>`;
       return `<div class="album-cell" data-pid="${p.id}"><img data-id="${p.id}" src="${src}" alt="" loading="lazy">${fav}${tag}</div>`;
     }).join('');
     return `<section data-day="${dayMs}">` +
-      `<div class="day-head"><span class="day-num">Day ${di + 1}</span>` +
+      `<div class="day-head"><span class="day-num">${t('album.day')} ${di + 1}</span>` +
       `<span class="day-date">${d.getFullYear()}.${pad(d.getMonth() + 1)}.${pad(d.getDate())} (${wds[d.getDay()]})</span>` +
       `<span class="day-place">${place ? '📍 ' + place : ''}</span>` +
-      `<span class="day-count">${photos.length}장</span></div>` +
+      `<span class="day-count">${photos.length}${shotsU}</span></div>` +
       `<div class="album-grid">${cells}</div></section>`;
   }).join('');
   body.onclick = (e) => {
@@ -3539,6 +3563,9 @@ function init() {
 
   // Route animation playback ("trip replay")
   $('playBtn').addEventListener('click', () => RoutePlay.start());
+
+  // Language toggle (KO ⇄ EN)
+  $('langBtn').addEventListener('click', () => setLang(LANG === 'ko' ? 'en' : 'ko'));
 
   // Project save / load / re-attach originals
   $('saveProjectBtn').addEventListener('click', saveProject);
