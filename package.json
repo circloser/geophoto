@@ -1,0 +1,9 @@
+{
+  "name": "geophoto-map-navigator",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Client-side GPS-photo map navigator — a single-file, no-build PWA.",
+  "scripts": {
+    "test": "node tests/run.mjs"
+  }
+}
