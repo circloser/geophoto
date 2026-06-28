@@ -220,6 +220,8 @@
       <input id="folderInput" type="file" accept="image/*" multiple webkitdirectory directory class="hidden" />
     </label>
 
+    <button id="sampleBtnTop" type="button" class="px-3 py-1.5 text-sm rounded-md border border-blue-300 text-blue-700 bg-blue-50 hover:bg-blue-100" title="샘플 여행 데이터로 바로 체험" data-i18n="sample.short">✨ 샘플</button>
+
     <!-- 불러오기 (개별 파일 / GPX 트랙 / 프로젝트 열기) -->
     <div class="dd" id="ddLoad">
       <button type="button" class="dd-btn">📥 <span class="hidden sm:inline" data-i18n="menu.load">불러오기</span> <span class="dd-caret">▾</span></button>
@@ -352,6 +354,7 @@
           <div class="text-4xl mb-3">🗺️📸</div>
           <h2 class="text-lg font-bold text-slate-700 mb-1" data-i18n="overlay.title">사진으로 떠나는 지도 여행</h2>
           <p id="overlayMsg" data-i18n="overlay.msg" class="text-sm text-slate-500">📁 폴더를 선택하면 사진이 찍힌 곳을 지도 위에 모아 보여드려요.<br/>여행 기록도, 현장 조사도 — 키 없이 바로 시작! (기본 지도: OpenStreetMap)</p>
+          <button id="sampleBtn" type="button" class="mt-4 inline-flex items-center justify-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-md cursor-pointer pointer-events-auto shadow" data-i18n="sample.btn">✨ 샘플 데이터로 둘러보기</button>
         </div>
       </div>
 
@@ -759,6 +762,7 @@ const I18N = {
     'route.title': '여행 다시보기', 'route.play': '재생', 'route.pause': '일시정지', 'route.replay': '다시 재생',
     'route.speed': '속도', 'route.exit': '닫기', 'route.empty': 'GPS 사진이 2장 이상 있어야 재생할 수 있어요.',
     'btn.folder': '폴더 선택', 'lang.name': 'EN',
+    'sample.btn': '✨ 샘플 데이터로 둘러보기', 'sample.short': '✨ 샘플', 'sample.loading': '샘플 여행을 불러오는 중…',
     'overlay.title': '사진으로 떠나는 지도 여행',
     'overlay.msg': '📁 폴더를 선택하면 사진이 찍힌 곳을 지도 위에 모아 보여드려요. 여행 기록도, 현장 조사도 — 키 없이 바로 시작! (기본 지도: OpenStreetMap)',
     'album.title': '여행 앨범', 'album.toMap': '🗺 지도로', 'album.empty': '불러온 사진이 없습니다. 📁 폴더를 선택하세요.',
@@ -785,6 +789,7 @@ const I18N = {
     'route.title': 'Trip replay', 'route.play': 'Play', 'route.pause': 'Pause', 'route.replay': 'Replay',
     'route.speed': 'Speed', 'route.exit': 'Close', 'route.empty': 'Need at least 2 geotagged photos to replay.',
     'btn.folder': 'Open folder', 'lang.name': '한',
+    'sample.btn': '✨ Explore with sample data', 'sample.short': '✨ Sample', 'sample.loading': 'Loading a sample trip…',
     'overlay.title': 'A map journey through your photos',
     'overlay.msg': '📁 Pick a folder and we will map where each photo was taken. Travel logs or field surveys — start instantly, no API key. (Default map: OpenStreetMap)',
     'album.title': 'Travel album', 'album.toMap': '🗺 Map', 'album.empty': 'No photos loaded. 📁 Choose a folder.',
@@ -1061,6 +1066,73 @@ async function makePin(file, size, outlier, direction) {
   if (src && src.close) src.close();
   if (cleanup) URL.revokeObjectURL(cleanup);
   return { url: c.toDataURL('image/png'), w: W, h: H, ax: cx, ay: H };
+}
+
+/* =========================================================================
+   Sample trip — a one-click demo so anyone (e.g. a judge) without GPS photos
+   can experience the app instantly. Synthetic photos are fed through the SAME
+   post-load pipeline as real files (pins, clustering, slider, stats), so every
+   feature works on them exactly like real data.
+   ========================================================================= */
+function sampleImageFile(label, hue) {
+  const c = document.createElement('canvas'); c.width = 480; c.height = 360;
+  const x = c.getContext('2d');
+  const g = x.createLinearGradient(0, 0, 480, 360);
+  g.addColorStop(0, `hsl(${hue},68%,60%)`); g.addColorStop(1, `hsl(${(hue + 38) % 360},62%,42%)`);
+  x.fillStyle = g; x.fillRect(0, 0, 480, 360);
+  x.fillStyle = 'rgba(255,255,255,.20)'; x.beginPath(); x.arc(402, 78, 44, 0, Math.PI * 2); x.fill();
+  x.fillStyle = 'rgba(0,0,0,.16)'; x.fillRect(0, 256, 480, 104);
+  x.fillStyle = '#fff'; x.textAlign = 'center';
+  x.font = "bold 30px 'Apple SD Gothic Neo','Noto Sans KR',sans-serif"; x.fillText(label, 240, 198);
+  x.font = "13px sans-serif"; x.fillStyle = 'rgba(255,255,255,.85)'; x.fillText('GeoPhoto sample', 240, 332);
+  return new Promise(res => c.toBlob(b => res(new File([b], label + '.jpg', { type: 'image/jpeg' })), 'image/jpeg', 0.85));
+}
+async function loadSampleTrip() {
+  // [place, lat, lng, [Y,M0,D,h,m], cam(0=iPhone/1=Galaxy), dir|null, fav, rating, hue]
+  const S = [
+    ['경복궁', 37.5796, 126.9770, [2024, 9, 12, 9, 20], 0, 135, true, 5, 205],
+    ['북촌한옥마을', 37.5826, 126.9849, [2024, 9, 12, 10, 40], 0, null, false, 4, 30],
+    ['광화문광장', 37.5725, 126.9769, [2024, 9, 12, 12, 10], 1, null, false, 0, 190],
+    ['명동거리', 37.5637, 126.9850, [2024, 9, 12, 14, 30], 0, null, true, 4, 330],
+    ['남산서울타워', 37.5512, 126.9882, [2024, 9, 12, 17, 50], 0, 200, true, 5, 265],
+    ['반포한강공원', 37.5101, 126.9959, [2024, 9, 12, 20, 10], 1, null, false, 3, 240],
+    ['서울역', 37.5559, 126.9723, [2024, 9, 13, 8, 30], 0, null, false, 0, 210],
+    ['부산역', 35.1151, 129.0413, [2024, 9, 13, 11, 40], 1, null, false, 0, 200],
+    ['감천문화마을', 35.0975, 129.0107, [2024, 9, 13, 13, 30], 0, 90, true, 5, 20],
+    ['자갈치시장', 35.0967, 129.0305, [2024, 9, 13, 15, 40], 1, null, false, 3, 345],
+    ['해운대해수욕장', 35.1587, 129.1604, [2024, 9, 14, 9, 10], 0, 120, true, 5, 195],
+    ['광안리해변', 35.1532, 129.1187, [2024, 9, 14, 12, 30], 1, null, false, 4, 210],
+    ['더베이101', 35.1533, 129.1226, [2024, 9, 14, 19, 40], 0, null, true, 5, 250],
+    ['부산역', 35.1151, 129.0413, [2024, 9, 14, 21, 30], 0, null, false, 0, 215],
+  ];
+  const cams = [['Apple', 'iPhone 15 Pro'], ['Samsung', 'SM-S928N']];
+  releaseDetailUrl(); stopSlideshow && stopSlideshow();
+  State.photos = []; State.geo = []; State.detailList = []; State.noGpsCount = 0;
+  State.timeFrom = null; State.timeTo = null; State.favoritesOnly = false;
+  closeDetail();
+  showLoading(true, t('sample.loading'));
+  for (let i = 0; i < S.length; i++) {
+    const [place, lat, lng, h, cam, dir, fav, rate, hue] = S[i];
+    const file = await sampleImageFile(place, hue);
+    const ts = new Date(h[0], h[1], h[2], h[3], h[4] || 0).getTime();
+    State.photos.push({
+      id: 's' + i + '_' + Math.random().toString(36).slice(2, 7),
+      fileName: place + '.jpg', pin: null, timestamp: ts,
+      originalGps: { lat, lng }, correctedGps: { lat, lng }, isOutlier: false, hasGps: true,
+      direction: (dir != null ? dir : null),
+      exif: { make: cams[cam][0], model: cams[cam][1], focalLength: 6.9, focal35: (dir != null ? 26 : null), fNumber: 1.8, iso: 100, altitude: 30 },
+      placeName: place, fromTrack: false, keepCorrection: true,
+      attrs: { memo: '', tags: '', rating: rate || 0, fav: !!fav },
+      _file: file, _displayBlob: file,
+    });
+  }
+  State.detailList = State.photos.slice().sort((a, b) => a.timestamp - b.timestamp);
+  State.geo = State.photos.filter(p => p.hasGps).sort((a, b) => a.timestamp - b.timestamp);
+  for (const p of State.geo) p.pin = await makePin(await displayBlob(p), Settings.thumbSize, p.isOutlier, p.direction);
+  computeClusters(); populateClusterNav(); setupTimeSlider();
+  showLoading(false); updateStatus();
+  hideOverlay();
+  await ensureMapReady(true);
 }
 
 /* ---------- EXIF / folder loading ---------- */
@@ -3523,6 +3595,8 @@ function init() {
 
   $('folderInput').addEventListener('change', e => { if (e.target.files.length) loadFiles(e.target.files); });
   $('filesInput').addEventListener('change', e => { if (e.target.files.length) loadFiles(e.target.files); });
+  $('sampleBtn').addEventListener('click', loadSampleTrip);
+  $('sampleBtnTop').addEventListener('click', loadSampleTrip);
 
   $('providerSelect').addEventListener('change', async e => {
     const prev = State.provider;
