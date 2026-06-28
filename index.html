@@ -59,7 +59,7 @@
   /* Hidden by default; shown only when the menu is open. flex-direction/gap live
      on .dd-panel itself (inert until display:flex) so no other class can win the
      display battle by specificity/order and leave the panel stuck visible. */
-  .dd-panel { position: absolute; top: calc(100% + 5px); left: 0; min-width: 214px; background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 10px 30px rgba(2,6,23,.16); padding: 8px; z-index: 60; display: none; flex-direction: column; gap: 7px; }
+  .dd-panel { position: absolute; top: calc(100% + 5px); left: 0; min-width: 214px; max-width: calc(100vw - 24px); background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 10px 30px rgba(2,6,23,.16); padding: 8px; z-index: 60; display: none; flex-direction: column; gap: 7px; }
   .dd.open .dd-panel { display: flex; }
   .dd-panel.dd-right { left: auto; right: 0; }
   .dd-label { font-size: 11px; font-weight: 600; color: #94a3b8; margin: 3px 2px -3px; }
@@ -320,7 +320,7 @@
 
     <button id="settingsBtn" class="px-3 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50">⚙️ <span class="hidden sm:inline" data-i18n="btn.settings">설정</span></button>
 
-    <button id="langBtn" class="ml-auto px-2.5 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50" title="Language / 언어">🌐 <span data-i18n="lang.name">EN</span></button>
+    <button id="langBtn" class="ml-auto px-2.5 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50" title="Language / 언어" data-i18n-aria="a.lang" aria-label="언어 전환">🌐 <span data-i18n="lang.name">EN</span></button>
 
     <span id="netBadge" class="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-emerald-100 text-emerald-700" title="네트워크 상태">● 온라인</span>
     <div id="status" class="text-xs text-slate-500 leading-tight text-right"></div>
@@ -328,7 +328,7 @@
 
   <!-- ===== Time filter bar (shown after photos load) ===== -->
   <div id="timeBar" class="hidden items-center gap-2 px-3 py-1.5 bg-white border-b border-slate-200 text-xs text-slate-600">
-    <span class="font-medium whitespace-nowrap">🕑 시간 필터</span>
+    <span class="font-medium whitespace-nowrap" data-i18n="time.filter">🕑 시간 필터</span>
     <span id="timeFromLabel" class="font-mono whitespace-nowrap text-slate-500"></span>
     <div id="timeRange" class="time-range flex-1 min-w-[140px] max-w-[18rem]">
       <div class="time-range-track"></div>
@@ -338,7 +338,7 @@
       <input id="timeTo" type="range" min="0" max="1000" value="1000" class="time-range-input time-range-input-to" aria-label="시간 필터 종료" />
     </div>
     <span id="timeToLabel" class="font-mono whitespace-nowrap text-slate-500"></span>
-    <button id="timeReset" class="px-2 py-1 rounded border border-slate-300 hover:bg-slate-50 whitespace-nowrap">초기화</button>
+    <button id="timeReset" class="px-2 py-1 rounded border border-slate-300 hover:bg-slate-50 whitespace-nowrap" data-i18n="time.reset">초기화</button>
     <span id="timeCount" class="text-slate-400 whitespace-nowrap"></span>
   </div>
 
@@ -413,48 +413,48 @@
 
 <!-- ===== Settings modal ===== -->
 <div id="settingsModal" class="hidden fixed inset-0 bg-black/40 items-center justify-center p-4" style="z-index: 10000;">
-  <div class="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-auto">
+  <div class="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-auto" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
     <div class="flex items-center justify-between px-5 py-3 border-b border-slate-200">
-      <h3 class="font-bold text-slate-700">⚙️ 설정</h3>
-      <button id="settingsClose" class="text-slate-400 hover:text-slate-700 text-xl leading-none">×</button>
+      <h3 id="settingsTitle" class="font-bold text-slate-700" data-i18n="set.title">⚙️ 설정</h3>
+      <button id="settingsClose" class="text-slate-400 hover:text-slate-700 text-xl leading-none" data-i18n-aria="a.close" aria-label="닫기">×</button>
     </div>
     <div class="p-5 space-y-4 text-sm">
-      <p class="text-xs text-slate-500 bg-slate-50 rounded-md p-2 leading-relaxed">
+      <p class="text-xs text-slate-500 bg-slate-50 rounded-md p-2 leading-relaxed" data-i18n="set.privacy">
         지도 API 키는 이 브라우저(localStorage)에만 저장되며 서버로 전송되지 않습니다.
         선택한 지도 제공자의 키가 있어야 지도가 표시됩니다.
       </p>
       <div>
         <label class="block font-medium text-slate-600 mb-1">Google Maps API Key</label>
         <input id="keyGoogle" type="text" placeholder="AIza..." class="w-full border border-slate-300 rounded-md px-2 py-1.5" />
-        <p class="text-[11px] text-slate-400 mt-0.5">Maps JavaScript API 사용 설정 필요</p>
+        <p class="text-[11px] text-slate-400 mt-0.5" data-i18n="set.googleHint">Maps JavaScript API 사용 설정 필요</p>
       </div>
       <div>
         <label class="block font-medium text-slate-600 mb-1">Naver Maps Key ID (ncpKeyId)</label>
         <input id="keyNaver" type="text" placeholder="ncpKeyId" class="w-full border border-slate-300 rounded-md px-2 py-1.5" />
-        <p class="text-[11px] text-slate-400 mt-0.5">NCP 콘솔 Maps의 신규 Key ID. 콘솔에 서비스 URL(도메인) 등록 필요</p>
+        <p class="text-[11px] text-slate-400 mt-0.5" data-i18n="set.naverHint">NCP 콘솔 Maps의 신규 Key ID. 콘솔에 서비스 URL(도메인) 등록 필요</p>
       </div>
       <div>
         <label class="block font-medium text-slate-600 mb-1">Kakao Maps JavaScript Key</label>
         <input id="keyKakao" type="text" placeholder="JavaScript 키" class="w-full border border-slate-300 rounded-md px-2 py-1.5" />
-        <p class="text-[11px] text-slate-400 mt-0.5">카카오 개발자 > 앱 > JavaScript 키 (도메인 등록 필요)</p>
+        <p class="text-[11px] text-slate-400 mt-0.5" data-i18n="set.kakaoHint">카카오 개발자 > 앱 > JavaScript 키 (도메인 등록 필요)</p>
       </div>
       <hr class="border-slate-200" />
       <div class="grid grid-cols-3 gap-3">
         <div>
-          <label class="block font-medium text-slate-600 mb-1">이상치 속도(km/h)</label>
+          <label class="block font-medium text-slate-600 mb-1" data-i18n="set.optSpeed">이상치 속도(km/h)</label>
           <input id="optSpeed" type="number" min="1" class="w-full border border-slate-300 rounded-md px-2 py-1.5" />
         </div>
         <div>
-          <label class="block font-medium text-slate-600 mb-1">경로 끊김(분)</label>
+          <label class="block font-medium text-slate-600 mb-1" data-i18n="set.optGap">경로 끊김(분)</label>
           <input id="optGap" type="number" min="1" class="w-full border border-slate-300 rounded-md px-2 py-1.5" />
         </div>
         <div>
-          <label class="block font-medium text-slate-600 mb-1">썸네일 크기(px)</label>
+          <label class="block font-medium text-slate-600 mb-1" data-i18n="set.optThumb">썸네일 크기(px)</label>
           <input id="optThumb" type="number" min="24" max="120" class="w-full border border-slate-300 rounded-md px-2 py-1.5" />
         </div>
       </div>
       <div class="flex justify-end gap-2 pt-2">
-        <button id="settingsSave" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium">저장 &amp; 적용</button>
+        <button id="settingsSave" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium" data-i18n="set.save">저장 &amp; 적용</button>
       </div>
     </div>
   </div>
@@ -463,48 +463,48 @@
 <!-- ===== GPX track geotagging modal ===== -->
 <input id="gpxInput" type="file" accept=".gpx,application/gpx+xml,text/xml" class="hidden" />
 <div id="trackModal" class="hidden fixed inset-0 bg-black/40 items-center justify-center p-4" style="z-index: 10000;">
-  <div class="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-auto">
+  <div class="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-auto" role="dialog" aria-modal="true" aria-labelledby="trackTitle">
     <div class="flex items-center justify-between px-5 py-3 border-b border-slate-200">
-      <h3 class="font-bold text-slate-700">🛰 GPX 트랙 지오태깅</h3>
-      <button id="trackClose" class="text-slate-400 hover:text-slate-700 text-xl leading-none">×</button>
+      <h3 id="trackTitle" class="font-bold text-slate-700" data-i18n="trk.title">🛰 GPX 트랙 지오태깅</h3>
+      <button id="trackClose" class="text-slate-400 hover:text-slate-700 text-xl leading-none" data-i18n-aria="a.close" aria-label="닫기">×</button>
     </div>
     <div class="p-5 space-y-4 text-sm">
-      <p class="text-xs text-slate-500 bg-slate-50 rounded-md p-2 leading-relaxed">
+      <p class="text-xs text-slate-500 bg-slate-50 rounded-md p-2 leading-relaxed" data-i18n="trk.intro">
         GPS 로거의 <b>.gpx</b> 트랙을 불러오면, 사진 촬영시각과 트랙 시각을 맞춰 좌표가 없는 사진에 위치를 자동 부여합니다.
         카메라 시계 오차가 있으면 아래 보정값으로 맞추세요.
       </p>
-      <button id="gpxPick" class="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md">📂 GPX 파일 선택</button>
+      <button id="gpxPick" class="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md" data-i18n="trk.pick">📂 GPX 파일 선택</button>
       <div id="trackSummary" class="text-xs text-slate-500"></div>
 
       <div class="grid grid-cols-2 gap-3">
         <div>
-          <label class="block font-medium text-slate-600 mb-1">카메라 시계 보정</label>
+          <label class="block font-medium text-slate-600 mb-1" data-i18n="trk.clock">카메라 시계 보정</label>
           <div class="flex items-center gap-1">
-            <select id="trackSign" class="border border-slate-300 rounded-md px-1 py-1.5">
+            <select id="trackSign" class="border border-slate-300 rounded-md px-1 py-1.5" aria-label="부호">
               <option value="1">+</option><option value="-1">−</option>
             </select>
-            <input id="trackH" type="number" min="0" value="0" class="w-14 border border-slate-300 rounded-md px-2 py-1.5" title="시"/>
-            <span>시</span>
-            <input id="trackM" type="number" min="0" max="59" value="0" class="w-14 border border-slate-300 rounded-md px-2 py-1.5" title="분"/>
-            <span>분</span>
-            <input id="trackS" type="number" min="0" max="59" value="0" class="w-14 border border-slate-300 rounded-md px-2 py-1.5" title="초"/>
-            <span>초</span>
+            <input id="trackH" type="number" min="0" value="0" class="w-14 border border-slate-300 rounded-md px-2 py-1.5" data-i18n-aria="trk.h" aria-label="시"/>
+            <span data-i18n="trk.h">시</span>
+            <input id="trackM" type="number" min="0" max="59" value="0" class="w-14 border border-slate-300 rounded-md px-2 py-1.5" data-i18n-aria="trk.m" aria-label="분"/>
+            <span data-i18n="trk.m">분</span>
+            <input id="trackS" type="number" min="0" max="59" value="0" class="w-14 border border-slate-300 rounded-md px-2 py-1.5" data-i18n-aria="trk.s" aria-label="초"/>
+            <span data-i18n="trk.s">초</span>
           </div>
-          <p class="text-[11px] text-slate-400 mt-0.5">사진 시각에 더할 값 (촬영시각이 트랙보다 빠르면 +)</p>
+          <p class="text-[11px] text-slate-400 mt-0.5" data-i18n="trk.offsetHint">사진 시각에 더할 값 (촬영시각이 트랙보다 빠르면 +)</p>
         </div>
         <div>
-          <label class="block font-medium text-slate-600 mb-1">허용 시간차(분)</label>
+          <label class="block font-medium text-slate-600 mb-1" data-i18n="trk.tol">허용 시간차(분)</label>
           <input id="trackTol" type="number" min="0" value="60" class="w-full border border-slate-300 rounded-md px-2 py-1.5"/>
-          <p class="text-[11px] text-slate-400 mt-0.5">트랙 시간 범위 밖이라도 이 시간 내면 끝점에 스냅</p>
+          <p class="text-[11px] text-slate-400 mt-0.5" data-i18n="trk.tolHint">트랙 시간 범위 밖이라도 이 시간 내면 끝점에 스냅</p>
         </div>
       </div>
       <div>
-        <label class="block font-medium text-slate-600 mb-1">대상</label>
-        <label class="inline-flex items-center gap-1.5 mr-4"><input type="radio" name="trackScope" value="missing" checked /> GPS 없는 사진만</label>
-        <label class="inline-flex items-center gap-1.5"><input type="radio" name="trackScope" value="all" /> 전체 재태깅</label>
+        <label class="block font-medium text-slate-600 mb-1" data-i18n="trk.scope">대상</label>
+        <label class="inline-flex items-center gap-1.5 mr-4"><input type="radio" name="trackScope" value="missing" checked /> <span data-i18n="trk.scopeMissing">GPS 없는 사진만</span></label>
+        <label class="inline-flex items-center gap-1.5"><input type="radio" name="trackScope" value="all" /> <span data-i18n="trk.scopeAll">전체 재태깅</span></label>
       </div>
       <div class="flex justify-end gap-2 pt-2">
-        <button id="trackApply" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium disabled:opacity-40" disabled>적용</button>
+        <button id="trackApply" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium disabled:opacity-40" disabled data-i18n="trk.apply">적용</button>
       </div>
     </div>
   </div>
@@ -512,10 +512,10 @@
 
 <!-- ===== Compare tray (floating, shows picked photos) ===== -->
 <div id="compareTray" class="hidden fixed left-1/2 -translate-x-1/2 bottom-4 z-40 bg-white rounded-xl shadow-2xl border border-slate-200 px-3 py-2 flex items-center gap-3">
-  <span class="text-sm text-slate-600 font-medium">비교 선택</span>
+  <span class="text-sm text-slate-600 font-medium" data-i18n="cmp.pick">비교 선택</span>
   <div id="compareThumbs" class="flex items-center gap-2"></div>
-  <button id="compareOpen" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-md disabled:opacity-40">비교하기</button>
-  <button id="compareClear" class="px-2 py-1.5 text-slate-400 hover:text-slate-700 text-sm">비우기</button>
+  <button id="compareOpen" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-md disabled:opacity-40" data-i18n="cmp.open">비교하기</button>
+  <button id="compareClear" class="px-2 py-1.5 text-slate-400 hover:text-slate-700 text-sm" data-i18n="cmp.clear">비우기</button>
 </div>
 
 <!-- ===== Compare modal (two photos side by side) ===== -->
@@ -524,7 +524,7 @@
     <div class="cmp-panel" data-side="0"></div>
     <div class="cmp-panel" data-side="1"></div>
   </div>
-  <button id="compareModalClose" class="absolute top-3 right-4 text-white/90 hover:text-white text-3xl leading-none z-10">×</button>
+  <button id="compareModalClose" class="absolute top-3 right-4 text-white/90 hover:text-white text-3xl leading-none z-10" data-i18n-aria="a.close" aria-label="닫기">×</button>
 </div>
 
 <style>
@@ -599,7 +599,7 @@
   <div class="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-auto">
     <div class="flex items-center justify-between px-5 py-3 border-b border-slate-200 sticky top-0 bg-white/95 backdrop-blur z-10">
       <h3 class="font-bold text-slate-700">📊 <span data-i18n="stats.title">여행 통계</span></h3>
-      <button id="statsClose" class="text-slate-400 hover:text-slate-700 text-2xl leading-none">×</button>
+      <button id="statsClose" class="text-slate-400 hover:text-slate-700 text-2xl leading-none" data-i18n-aria="a.close" aria-label="닫기">×</button>
     </div>
     <div id="statsBody" class="p-5"></div>
   </div>
@@ -770,6 +770,18 @@ const I18N = {
     'opt.roadmap': '일반', 'opt.satellite': '위성', 'opt.hybrid': '하이브리드',
     'opt.dot': '점 (Dot)', 'opt.heat': '점구름 (Heatmap)',
     'opt.pathCorrected': '보정 좌표', 'opt.pathOriginal': '원본 좌표', 'opt.pathOff': '끄기',
+    'time.filter': '🕑 시간 필터', 'time.reset': '초기화',
+    'net.online': '● 온라인', 'net.offline': '● 오프라인',
+    'set.title': '⚙️ 설정', 'set.privacy': '지도 API 키는 이 브라우저(localStorage)에만 저장되며 서버로 전송되지 않습니다. 선택한 지도 제공자의 키가 있어야 지도가 표시됩니다.',
+    'set.googleHint': 'Maps JavaScript API 사용 설정 필요', 'set.naverHint': 'NCP 콘솔 Maps의 신규 Key ID. 콘솔에 서비스 URL(도메인) 등록 필요', 'set.kakaoHint': '카카오 개발자 > 앱 > JavaScript 키 (도메인 등록 필요)',
+    'set.optSpeed': '이상치 속도(km/h)', 'set.optGap': '경로 끊김(분)', 'set.optThumb': '썸네일 크기(px)', 'set.save': '저장 & 적용',
+    'trk.title': '🛰 GPX 트랙 지오태깅', 'trk.intro': 'GPS 로거의 .gpx 트랙을 불러오면, 사진 촬영시각과 트랙 시각을 맞춰 좌표가 없는 사진에 위치를 자동 부여합니다. 카메라 시계 오차가 있으면 아래 보정값으로 맞추세요.',
+    'trk.pick': '📂 GPX 파일 선택', 'trk.clock': '카메라 시계 보정', 'trk.h': '시', 'trk.m': '분', 'trk.s': '초',
+    'trk.offsetHint': '사진 시각에 더할 값 (촬영시각이 트랙보다 빠르면 +)', 'trk.tol': '허용 시간차(분)', 'trk.tolHint': '트랙 시간 범위 밖이라도 이 시간 내면 끝점에 스냅',
+    'trk.scope': '대상', 'trk.scopeMissing': 'GPS 없는 사진만', 'trk.scopeAll': '전체 재태깅', 'trk.apply': '적용',
+    'cmp.pick': '비교 선택', 'cmp.open': '비교하기', 'cmp.clear': '비우기',
+    'a.close': '닫기', 'a.settings': '설정 열기', 'a.lang': '언어 전환',
+    'al.needPhotos': '먼저 사진을 불러오세요.', 'al.noGps': '내보낼 GPS 사진이 없습니다.',
   },
   en: {
     'app.tagline': 'A map journey through your photos',
@@ -797,6 +809,18 @@ const I18N = {
     'opt.roadmap': 'Road', 'opt.satellite': 'Satellite', 'opt.hybrid': 'Hybrid',
     'opt.dot': 'Dot', 'opt.heat': 'Heatmap',
     'opt.pathCorrected': 'Corrected', 'opt.pathOriginal': 'Original', 'opt.pathOff': 'Off',
+    'time.filter': '🕑 Time filter', 'time.reset': 'Reset',
+    'net.online': '● Online', 'net.offline': '● Offline',
+    'set.title': '⚙️ Settings', 'set.privacy': 'Map API keys are stored only in this browser (localStorage) and are never sent to a server. The selected provider needs its key for the map to show.',
+    'set.googleHint': 'Requires the Maps JavaScript API enabled', 'set.naverHint': 'New Key ID from NCP Maps; register your service URL (domain) in the console.', 'set.kakaoHint': 'Kakao Developers > App > JavaScript key (domain registration required)',
+    'set.optSpeed': 'Outlier speed (km/h)', 'set.optGap': 'Path break (min)', 'set.optThumb': 'Thumbnail size (px)', 'set.save': 'Save & apply',
+    'trk.title': '🛰 GPX track geotagging', 'trk.intro': 'Load a .gpx track from a GPS logger to auto-assign coordinates to photos that lack them, by matching capture time to track time. Use the offset below to correct any camera-clock drift.',
+    'trk.pick': '📂 Choose GPX file', 'trk.clock': 'Camera clock offset', 'trk.h': 'h', 'trk.m': 'm', 'trk.s': 's',
+    'trk.offsetHint': 'Added to the photo time (+ if the photo clock is ahead of the track)', 'trk.tol': 'Tolerance (min)', 'trk.tolHint': 'Snap to the nearest endpoint if within this many minutes of the track range',
+    'trk.scope': 'Target', 'trk.scopeMissing': 'GPS-less photos only', 'trk.scopeAll': 'Re-tag all', 'trk.apply': 'Apply',
+    'cmp.pick': 'Compare picks', 'cmp.open': 'Compare', 'cmp.clear': 'Clear',
+    'a.close': 'Close', 'a.settings': 'Open settings', 'a.lang': 'Toggle language',
+    'al.needPhotos': 'Load some photos first.', 'al.noGps': 'No geotagged photos to export.',
   },
 };
 let LANG = (() => { try { return localStorage.getItem('geophoto.lang') || 'ko'; } catch (e) { return 'ko'; } })();
@@ -806,11 +830,13 @@ function applyLang() {
   document.querySelectorAll('[data-i18n]').forEach(el => { el.textContent = t(el.getAttribute('data-i18n')); });
   document.querySelectorAll('[data-i18n-title]').forEach(el => { el.title = t(el.getAttribute('data-i18n-title')); });
   document.querySelectorAll('[data-i18n-ph]').forEach(el => { el.placeholder = t(el.getAttribute('data-i18n-ph')); });
+  document.querySelectorAll('[data-i18n-aria]').forEach(el => { el.setAttribute('aria-label', t(el.getAttribute('data-i18n-aria'))); });
 }
 function setLang(l) {
   LANG = (l === 'en') ? 'en' : 'ko';
   try { localStorage.setItem('geophoto.lang', LANG); } catch (e) {}
   applyLang();
+  if (typeof updateNetBadge === 'function') updateNetBadge(); // badge text is state-driven, not data-i18n
   // Re-render JS-built views that are currently visible.
   if (State.albumOpen && typeof renderAlbum === 'function') renderAlbum();
   const sm = document.getElementById('statsModal');
@@ -2413,8 +2439,8 @@ function attachTouchZoom(vp, img, getV, apply, opts) {
 /* ---------- Network status + Service Worker (PWA offline) ---------- */
 function updateNetBadge() {
   const b = $('netBadge'); if (!b) return;
-  if (navigator.onLine) { b.textContent = '● 온라인'; b.className = 'ml-auto inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-emerald-100 text-emerald-700'; }
-  else { b.textContent = '● 오프라인'; b.className = 'ml-auto inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-amber-100 text-amber-700'; }
+  if (navigator.onLine) { b.textContent = t('net.online'); b.className = 'inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-emerald-100 text-emerald-700'; }
+  else { b.textContent = t('net.offline'); b.className = 'inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-amber-100 text-amber-700'; }
 }
 function registerServiceWorker() {
   if (!('serviceWorker' in navigator)) return;
@@ -2971,7 +2997,7 @@ async function onGpxSelected(file) {
 }
 async function applyTrackTagging() {
   if (!State.track.length) return;
-  if (!State.photos.length) { alert('먼저 사진을 불러오세요.'); return; }
+  if (!State.photos.length) { alert(t('al.needPhotos')); return; }
   const sign = +$('trackSign').value;
   const h = +$('trackH').value || 0, mn = +$('trackM').value || 0, s = +$('trackS').value || 0;
   const offsetMs = sign * ((h * 3600 + mn * 60 + s) * 1000);
@@ -2990,7 +3016,7 @@ async function applyTrackTagging() {
 function exportData(fmt) {
   if (fmt === 'album') { exportAlbumHTML(); return; }
   const list = visibleGeo();
-  if (!list.length) { alert('내보낼 GPS 사진이 없습니다.'); return; }
+  if (!list.length) { alert(t('al.noGps')); return; }
   const stamp = new Date().toISOString().slice(0, 10);
   if (fmt === 'geojson') download(`geophoto-${stamp}.geojson`, 'application/geo+json', buildGeoJSON(list));
   else if (fmt === 'kml') download(`geophoto-${stamp}.kml`, 'application/vnd.google-earth.kml+xml', buildKML(list));
@@ -3359,7 +3385,7 @@ function openDetailFromAlbum(p) {
   if (p.hasGps && adapter().ready) adapter().panTo(p.correctedGps);
 }
 function openAlbum() {
-  if (!State.photos.length) { alert('먼저 사진을 불러오세요.'); return; }
+  if (!State.photos.length) { alert(t('al.needPhotos')); return; }
   State.albumOpen = true;
   $('albumPanel').classList.remove('hidden');
   $('albumBtn').classList.add('bg-blue-600', 'text-white', 'border-blue-600');
