@@ -782,6 +782,17 @@ const I18N = {
     'cmp.pick': '비교 선택', 'cmp.open': '비교하기', 'cmp.clear': '비우기',
     'a.close': '닫기', 'a.settings': '설정 열기', 'a.lang': '언어 전환',
     'al.needPhotos': '먼저 사진을 불러오세요.', 'al.noGps': '내보낼 GPS 사진이 없습니다.',
+    'st.noGps': 'GPS없음', 'st.corrected': '보정', 'st.simplified': '단순화',
+    'cl.all': '전체', 'cl.cluster': '군집',
+    'ld.exif': 'EXIF 분석 중', 'ld.thumbs': '썸네일 생성 중',
+    'mt.time': '시간', 'mt.coord': '좌표', 'mt.place': '지명', 'mt.bearing': '방위각',
+    'mt.device': '기기', 'mt.focal': '초점거리', 'mt.aperture': '조리개', 'mt.altitude': '고도',
+    'mt.original': '원본', 'mt.noGps': 'GPS 없음', 'mt.outlier': '⚠ 이상치 보정됨', 'mt.track': '🛰 트랙 태깅',
+    'mt.reattach': '📂 원본 다시 연결', 'mt.thumbOnly': '썸네일만 표시 중',
+    'at.fav': '즐겨찾기', 'at.memoRating': '메모·별점', 'at.tagsPh': '태그 (쉼표로 구분)', 'at.memoPh': '메모를 입력하세요…',
+    'ol.title': 'GPS 이상치', 'ol.usingCorrected': '보정 위치 사용 중', 'ol.usingOriginal': '원본 위치 사용 중',
+    'ol.moved': '이동', 'ol.corrected': '보정 위치', 'ol.original': '원본 위치',
+    'cmp8': '북,북동,동,남동,남,남서,서,북서',
   },
   en: {
     'app.tagline': 'A map journey through your photos',
@@ -821,6 +832,17 @@ const I18N = {
     'cmp.pick': 'Compare picks', 'cmp.open': 'Compare', 'cmp.clear': 'Clear',
     'a.close': 'Close', 'a.settings': 'Open settings', 'a.lang': 'Toggle language',
     'al.needPhotos': 'Load some photos first.', 'al.noGps': 'No geotagged photos to export.',
+    'st.noGps': 'No GPS', 'st.corrected': 'corrected', 'st.simplified': 'simplified',
+    'cl.all': 'All', 'cl.cluster': 'Cluster',
+    'ld.exif': 'Reading EXIF', 'ld.thumbs': 'Building thumbnails',
+    'mt.time': 'Time', 'mt.coord': 'Coords', 'mt.place': 'Place', 'mt.bearing': 'Bearing',
+    'mt.device': 'Device', 'mt.focal': 'Focal length', 'mt.aperture': 'Aperture', 'mt.altitude': 'Altitude',
+    'mt.original': 'Original', 'mt.noGps': 'No GPS', 'mt.outlier': '⚠ outlier corrected', 'mt.track': '🛰 track-tagged',
+    'mt.reattach': '📂 Re-link originals', 'mt.thumbOnly': 'thumbnail only',
+    'at.fav': 'Favorite', 'at.memoRating': 'Memo · rating', 'at.tagsPh': 'Tags (comma-separated)', 'at.memoPh': 'Add a note…',
+    'ol.title': 'GPS outlier', 'ol.usingCorrected': 'using corrected location', 'ol.usingOriginal': 'using original location',
+    'ol.moved': 'moved', 'ol.corrected': 'Corrected', 'ol.original': 'Original',
+    'cmp8': 'N,NE,E,SE,S,SW,W,NW',
   },
 };
 let LANG = (() => { try { return localStorage.getItem('geophoto.lang') || 'ko'; } catch (e) { return 'ko'; } })();
@@ -837,10 +859,16 @@ function setLang(l) {
   try { localStorage.setItem('geophoto.lang', LANG); } catch (e) {}
   applyLang();
   if (typeof updateNetBadge === 'function') updateNetBadge(); // badge text is state-driven, not data-i18n
-  // Re-render JS-built views that are currently visible.
+  // Re-render JS-built views (their strings are built in code, not via data-i18n).
+  if (typeof updateStatus === 'function') updateStatus();
+  if (typeof populateClusterNav === 'function' && State.clusters && State.clusters.length) populateClusterNav();
   if (State.albumOpen && typeof renderAlbum === 'function') renderAlbum();
   const sm = document.getElementById('statsModal');
   if (sm && !sm.classList.contains('hidden') && typeof renderDashboard === 'function') renderDashboard();
+  if (State.detailIndex >= 0 && typeof renderDetailMeta === 'function') {
+    const p = State.detailList[State.detailIndex];
+    if (p) { renderDetailMeta(p); renderDetailAttrs(p); renderDetailOutlier(p); }
+  }
 }
 
 const LS_KEY = 'geophoto.settings.v1';
@@ -1176,8 +1204,8 @@ async function loadFiles(fileList) {
   closeDetail();
 
   // EXIF parsing (off the UI thread when possible).
-  showLoading(true, `EXIF 분석 중… 0 / ${files.length}`);
-  const metas = await parseAllExif(files, (done, total) => setLoadingText(`EXIF 분석 중… ${done} / ${total}`));
+  showLoading(true, `${t('ld.exif')}… 0 / ${files.length}`);
+  const metas = await parseAllExif(files, (done, total) => setLoadingText(`${t('ld.exif')}… ${done} / ${total}`));
 
   for (let i = 0; i < files.length; i++) {
     const file = files[i];
@@ -1220,7 +1248,7 @@ async function loadFiles(fileList) {
     g++;
     p.pin = await makePin(await displayBlob(p), Settings.thumbSize, p.isOutlier, p.direction);
     if (g % 4 === 0 || g === State.geo.length) {
-      setLoadingText(`썸네일 생성 중… ${g} / ${State.geo.length}`);
+      setLoadingText(`${t('ld.thumbs')}… ${g} / ${State.geo.length}`);
       await new Promise(r => setTimeout(r, 0));
     }
   }
@@ -2167,33 +2195,33 @@ function fitDetailImage() {
 }
 function renderDetailMeta(photo) {
   const el = document.getElementById('detailMeta');
-  const t = new Date(photo.timestamp);
+  const dt = new Date(photo.timestamp);
   const pad = n => String(n).padStart(2, '0');
-  const tStr = `${t.getFullYear()}-${pad(t.getMonth()+1)}-${pad(t.getDate())} ${pad(t.getHours())}:${pad(t.getMinutes())}:${pad(t.getSeconds())}`;
+  const tStr = `${dt.getFullYear()}-${pad(dt.getMonth()+1)}-${pad(dt.getDate())} ${pad(dt.getHours())}:${pad(dt.getMinutes())}:${pad(dt.getSeconds())}`;
   let html = '';
-  if (!photo._file) html += `<div class="mb-1"><button id="reattachBtn" class="badge bg-blue-100 text-blue-700">📂 원본 다시 연결</button> <span class="text-slate-400">썸네일만 표시 중</span></div>`;
-  html += `<div><span class="text-slate-400">시간</span> ${tStr}</div>`;
+  if (!photo._file) html += `<div class="mb-1"><button id="reattachBtn" class="badge bg-blue-100 text-blue-700">${t('mt.reattach')}</button> <span class="text-slate-400">${t('mt.thumbOnly')}</span></div>`;
+  html += `<div><span class="text-slate-400">${t('mt.time')}</span> ${tStr}</div>`;
   if (photo.hasGps) {
-    html += `<div><span class="text-slate-400">좌표</span> ${photo.correctedGps.lat.toFixed(6)}, ${photo.correctedGps.lng.toFixed(6)}</div>`;
-    if (photo.placeName) html += `<div><span class="text-slate-400">지명</span> ${photo.placeName}</div>`;
+    html += `<div><span class="text-slate-400">${t('mt.coord')}</span> ${photo.correctedGps.lat.toFixed(6)}, ${photo.correctedGps.lng.toFixed(6)}</div>`;
+    if (photo.placeName) html += `<div><span class="text-slate-400">${t('mt.place')}</span> ${photo.placeName}</div>`;
     const badges = [];
-    if (photo.isOutlier) badges.push('<span class="badge bg-amber-100 text-amber-700">⚠ 이상치 보정됨</span>');
-    if (photo.fromTrack) badges.push('<span class="badge bg-sky-100 text-sky-700">🛰 트랙 태깅</span>');
+    if (photo.isOutlier) badges.push(`<span class="badge bg-amber-100 text-amber-700">${t('mt.outlier')}</span>`);
+    if (photo.fromTrack) badges.push(`<span class="badge bg-sky-100 text-sky-700">${t('mt.track')}</span>`);
     if (badges.length) html += `<div class="mt-1">${badges.join(' ')}</div>`;
-    if (photo.isOutlier && photo.originalGps) html += `<div class="text-slate-400">원본 ${photo.originalGps.lat.toFixed(6)}, ${photo.originalGps.lng.toFixed(6)}</div>`;
+    if (photo.isOutlier && photo.originalGps) html += `<div class="text-slate-400">${t('mt.original')} ${photo.originalGps.lat.toFixed(6)}, ${photo.originalGps.lng.toFixed(6)}</div>`;
   } else {
-    html += `<div><span class="badge bg-slate-200 text-slate-500">GPS 없음</span></div>`;
+    html += `<div><span class="badge bg-slate-200 text-slate-500">${t('mt.noGps')}</span></div>`;
   }
   if (photo.direction != null) {
-    html += `<div><span class="text-slate-400">방위각</span> ${(+photo.direction).toFixed(0)}° (${compass8(photo.direction)})</div>`;
+    html += `<div><span class="text-slate-400">${t('mt.bearing')}</span> ${(+photo.direction).toFixed(0)}° (${compass8(photo.direction)})</div>`;
   }
   const e = photo.exif || {};
   const ex = [];
-  if (e.make || e.model) ex.push(`<div><span class="text-slate-400">기기</span> ${[e.make, e.model].filter(Boolean).join(' ')}</div>`);
-  if (e.focalLength != null) ex.push(`<div><span class="text-slate-400">초점거리</span> ${(+e.focalLength).toFixed(0)}mm</div>`);
-  if (e.fNumber != null) ex.push(`<div><span class="text-slate-400">조리개</span> f/${(+e.fNumber).toFixed(1)}</div>`);
+  if (e.make || e.model) ex.push(`<div><span class="text-slate-400">${t('mt.device')}</span> ${[e.make, e.model].filter(Boolean).join(' ')}</div>`);
+  if (e.focalLength != null) ex.push(`<div><span class="text-slate-400">${t('mt.focal')}</span> ${(+e.focalLength).toFixed(0)}mm</div>`);
+  if (e.fNumber != null) ex.push(`<div><span class="text-slate-400">${t('mt.aperture')}</span> f/${(+e.fNumber).toFixed(1)}</div>`);
   if (e.iso != null) ex.push(`<div><span class="text-slate-400">ISO</span> ${Array.isArray(e.iso) ? e.iso[0] : e.iso}</div>`);
-  if (e.altitude != null) ex.push(`<div><span class="text-slate-400">고도</span> ${(+e.altitude).toFixed(1)}m</div>`);
+  if (e.altitude != null) ex.push(`<div><span class="text-slate-400">${t('mt.altitude')}</span> ${(+e.altitude).toFixed(1)}m</div>`);
   if (ex.length) html += `<div class="mt-1 pt-1 border-t border-slate-100 grid grid-cols-2 gap-x-3 gap-y-0.5">${ex.join('')}</div>`;
   html += `<div class="text-slate-400 pt-1">${State.detailIndex + 1} / ${State.detailList.length}</div>`;
   el.innerHTML = html;
@@ -2201,7 +2229,7 @@ function renderDetailMeta(photo) {
   if (rb) rb.onclick = () => $('reattachInput').click();
 }
 function compass8(deg) {
-  const dirs = ['북', '북동', '동', '남동', '남', '남서', '서', '북서'];
+  const dirs = t('cmp8').split(',');
   return dirs[Math.round(((deg % 360) + 360) % 360 / 45) % 8];
 }
 // --- Per-photo attributes (favourite / rating / tags / memo) ---
@@ -2212,12 +2240,12 @@ function renderDetailAttrs(photo) {
   const stars = [1, 2, 3, 4, 5].map(n => `<span class="star${n <= a.rating ? ' on' : ''}" data-star="${n}">★</span>`).join('');
   el.innerHTML =
     `<div class="attr-row mb-1.5">` +
-      `<span class="fav-btn${a.fav ? ' on' : ''}" id="favBtn" title="즐겨찾기">${a.fav ? '♥' : '♡'}</span>` +
+      `<span class="fav-btn${a.fav ? ' on' : ''}" id="favBtn" title="${t('at.fav')}" role="button" aria-label="${t('at.fav')}">${a.fav ? '♥' : '♡'}</span>` +
       `<span class="stars" id="starRow">${stars}</span>` +
-      `<span class="text-[11px] text-slate-400 ml-auto">메모·별점</span>` +
+      `<span class="text-[11px] text-slate-400 ml-auto">${t('at.memoRating')}</span>` +
     `</div>` +
-    `<input id="detailTags" type="text" placeholder="태그 (쉼표로 구분)" value="${(a.tags || '').replace(/"/g, '&quot;')}" class="mb-1.5" />` +
-    `<textarea id="detailMemo" placeholder="메모를 입력하세요…">${(a.memo || '').replace(/</g, '&lt;')}</textarea>`;
+    `<input id="detailTags" type="text" placeholder="${t('at.tagsPh')}" value="${(a.tags || '').replace(/"/g, '&quot;')}" class="mb-1.5" />` +
+    `<textarea id="detailMemo" placeholder="${t('at.memoPh')}">${(a.memo || '').replace(/</g, '&lt;')}</textarea>`;
   const cur = () => State.detailList[State.detailIndex];
   document.getElementById('favBtn').onclick = () => { const p = cur(); p.attrs.fav = !p.attrs.fav; renderDetailAttrs(p); renderMarkers(); updateStatus(); };
   document.getElementById('starRow').querySelectorAll('.star').forEach(s => {
@@ -2236,10 +2264,10 @@ function renderDetailOutlier(photo) {
     ? Math.round(haversine(photo.originalGps, photo._autoCorrectedGps)) : null;
   el.innerHTML =
     `<div class="py-2 border-t border-amber-200 bg-amber-50/60 -mx-3 px-3">` +
-      `<div class="text-xs text-amber-700 mb-1">⚠ GPS 이상치 — ${keeping ? '보정 위치 사용 중' : '원본 위치 사용 중'}${moved != null ? ` (이동 ${moved >= 1000 ? (moved/1000).toFixed(1)+'km' : moved+'m'})` : ''}</div>` +
+      `<div class="text-xs text-amber-700 mb-1">⚠ ${t('ol.title')} — ${keeping ? t('ol.usingCorrected') : t('ol.usingOriginal')}${moved != null ? ` (${t('ol.moved')} ${moved >= 1000 ? (moved/1000).toFixed(1)+'km' : moved+'m'})` : ''}</div>` +
       `<div class="flex gap-1.5">` +
-        `<button id="olKeep" class="dctl ${keeping ? 'bg-blue-600 text-white border-blue-600' : ''}">보정 위치</button>` +
-        `<button id="olOrig" class="dctl ${!keeping ? 'bg-amber-500 text-white border-amber-500' : ''}">원본 위치</button>` +
+        `<button id="olKeep" class="dctl ${keeping ? 'bg-blue-600 text-white border-blue-600' : ''}">${t('ol.corrected')}</button>` +
+        `<button id="olOrig" class="dctl ${!keeping ? 'bg-amber-500 text-white border-amber-500' : ''}">${t('ol.original')}</button>` +
       `</div>` +
     `</div>`;
   const setKeep = (v) => {
@@ -2328,17 +2356,47 @@ function renderCompareTray() {
 function releaseCompareUrls() {
   State.compareUrls.forEach((u, i) => { if (u) { URL.revokeObjectURL(u); State.compareUrls[i] = null; } });
 }
+/* Accessible modal helper — moves focus into a dialog, traps Tab within it, and
+   restores focus to the trigger on close, so keyboard / screen-reader users are
+   not stranded behind the dialog. */
+const ModalFocus = (() => {
+  let prev = null, el = null, handler = null;
+  const focusables = m => [...m.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')].filter(e => e.offsetParent !== null);
+  function trap(modal, onEsc) {
+    release();
+    prev = document.activeElement; el = modal;
+    const f = focusables(modal); if (f[0]) { try { f[0].focus(); } catch (e) {} }
+    handler = (e) => {
+      if (e.key === 'Escape') { if (onEsc) onEsc(); return; }
+      if (e.key !== 'Tab') return;
+      const items = focusables(modal); if (!items.length) return;
+      const first = items[0], last = items[items.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    };
+    modal.addEventListener('keydown', handler);
+  }
+  function release() {
+    if (el && handler) el.removeEventListener('keydown', handler);
+    const p = prev; el = null; handler = null; prev = null;
+    if (p && p.focus) { try { p.focus(); } catch (e) {} }
+  }
+  return { trap, release };
+})();
+
 function openCompare() {
   if (State.compareSet.length < 2) return;
   const modal = $('compareModal');
   modal.classList.remove('hidden'); modal.classList.add('flex');
   releaseCompareUrls();
   State.compareSet.slice(0, 2).forEach((photo, side) => fillComparePanel(side, photo));
+  ModalFocus.trap(modal, closeCompare);
 }
 function closeCompare() {
   const modal = $('compareModal');
   modal.classList.add('hidden'); modal.classList.remove('flex');
   releaseCompareUrls();
+  ModalFocus.release();
 }
 function fillComparePanel(side, photo) {
   const panel = document.querySelector(`.cmp-panel[data-side="${side}"]`);
@@ -2483,18 +2541,19 @@ function updateStatus(correctedCount, extra) {
   const s = document.getElementById('status');
   const parts = [];
   // Friendly trip summary: photos · days · favourites
-  parts.push(`📸 ${State.photos.length}장`);
+  const sp = (LANG === 'en') ? ' ' : '';
+  parts.push(`📸 ${State.photos.length}${sp}${t('unit.shots')}`);
   if (State.geo.length) {
     const days = new Set(State.geo.map(p => new Date(p.timestamp).toDateString())).size;
-    if (days > 1) parts.push(`📅 ${days}일`);
-    if (State.clusters.length > 1) parts.push(`📍 ${State.clusters.length}곳`);
+    if (days > 1) parts.push(`📅 ${days}${sp}${t('unit.days')}`);
+    if (State.clusters.length > 1) parts.push(`📍 ${State.clusters.length}${sp}${t('stats.unitPlaces')}`);
   }
   const favs = State.geo.filter(p => p.attrs && p.attrs.fav).length;
   if (favs) parts.push(`♥ ${favs}`);
-  if (State.noGpsCount) parts.push(`GPS없음 ${State.noGpsCount}`);
+  if (State.noGpsCount) parts.push(`${t('st.noGps')} ${State.noGpsCount}`);
   const oc = (correctedCount != null) ? correctedCount : State.geo.filter(p => p.isOutlier).length;
-  if (oc) parts.push(`보정 ${oc}`);
-  if (extra && extra.tooMany && State.thumbnailsOn) parts.push(`(${PERF_CAP}장 초과→단순화)`);
+  if (oc) parts.push(`${t('st.corrected')} ${oc}`);
+  if (extra && extra.tooMany && State.thumbnailsOn) parts.push(`(${PERF_CAP}+ ${t('st.simplified')})`);
   s.innerHTML = parts.join(' · ');
 }
 
@@ -2534,8 +2593,9 @@ function computeClusters() {
 function populateClusterNav() {
   const sel = $('clusterSelect');
   const cs = State.clusters;
-  sel.innerHTML = `<option value="all">전체 (${State.geo.length}장)</option>` +
-    cs.map((c, i) => `<option value="${i}">군집 ${i + 1} (${c.items.length}장)</option>`).join('');
+  const u = (LANG === 'en' ? ' ' : '') + t('unit.shots');
+  sel.innerHTML = `<option value="all">${t('cl.all')} (${State.geo.length}${u})</option>` +
+    cs.map((c, i) => `<option value="${i}">${t('cl.cluster')} ${i + 1} (${c.items.length}${u})</option>`).join('');
   sel.value = 'all';
   const nav = $('clusterNav');
   if (State.geo.length) { nav.classList.remove('hidden'); nav.classList.add('inline-flex'); }
@@ -2981,8 +3041,8 @@ function buildCSV(list) {
   return '﻿' + [header.join(','), ...rows].join('\r\n'); // BOM so Excel reads UTF-8
 }
 /* ---------- GPX track modal handlers ---------- */
-function openTrackModal() { const m = $('trackModal'); m.classList.remove('hidden'); m.classList.add('flex'); }
-function closeTrackModal() { const m = $('trackModal'); m.classList.add('hidden'); m.classList.remove('flex'); }
+function openTrackModal() { const m = $('trackModal'); m.classList.remove('hidden'); m.classList.add('flex'); ModalFocus.trap(m, closeTrackModal); }
+function closeTrackModal() { const m = $('trackModal'); m.classList.add('hidden'); m.classList.remove('flex'); ModalFocus.release(); }
 async function onGpxSelected(file) {
   const text = await file.text();
   const pts = parseGPX(text);
@@ -3528,8 +3588,8 @@ function renderDashboard() {
     }).catch(() => {});
   }
 }
-function openDashboard() { const m = $('statsModal'); renderDashboard(); m.classList.remove('hidden'); m.classList.add('flex'); }
-function closeDashboard() { const m = $('statsModal'); m.classList.add('hidden'); m.classList.remove('flex'); }
+function openDashboard() { const m = $('statsModal'); renderDashboard(); m.classList.remove('hidden'); m.classList.add('flex'); ModalFocus.trap(m, closeDashboard); }
+function closeDashboard() { const m = $('statsModal'); m.classList.add('hidden'); m.classList.remove('flex'); ModalFocus.release(); }
 
 /* =========================================================================
    Route animation — "trip replay". A marker travels the time-sorted path with
@@ -3863,8 +3923,9 @@ function openSettings() {
   $('optGap').value = Settings.gapMinutes;
   $('optThumb').value = Settings.thumbSize;
   const m = $('settingsModal'); m.classList.remove('hidden'); m.classList.add('flex');
+  ModalFocus.trap(m, closeSettings);
 }
-function closeSettings() { const m = $('settingsModal'); m.classList.add('hidden'); m.classList.remove('flex'); }
+function closeSettings() { const m = $('settingsModal'); m.classList.add('hidden'); m.classList.remove('flex'); ModalFocus.release(); }
 
 async function saveFromSettings() {
   try {
