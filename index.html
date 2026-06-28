@@ -1978,6 +1978,15 @@ function drawFovCones(a, list) {
   if (cones.length) a.drawFov(cones);
 }
 
+// Pixel size of the map area, or null when it isn't laid out yet (so callers
+// skip viewport culling and render everything rather than nothing).
+function mapViewport() {
+  const host = document.getElementById('map');
+  const wrap = host && host.parentElement;
+  if (!wrap) return null;
+  const w = wrap.clientWidth, h = wrap.clientHeight;
+  return (w > 0 && h > 0) ? { w, h } : null;
+}
 function renderMarkers() {
   const a = adapter();
   if (!a.ready) return;
@@ -1989,12 +1998,22 @@ function renderMarkers() {
   const useThumbs = State.thumbnailsOn && !tooMany;
   if (State.showFov) drawFovCones(a, vg);
 
+  // On-screen pixel bounds for viewport culling — only photos near the visible
+  // area become markers, so a set of thousands stays smooth on pan/zoom (off-
+  // screen pins are skipped and re-added when the view changes).
+  const vp = mapViewport();
+  const inVP = (px, pad) => !vp || (px.x >= -pad && px.x <= vp.w + pad && px.y >= -pad && px.y <= vp.h + pad);
+
   if (!useThumbs) {
     if (State.simplifiedMode === 'heat') {
       Heat.render(a, vg.map(p => p.correctedGps));
     } else {
       Heat.clear();
-      for (const p of vg) a.addDot(p, p.correctedGps, 'dot', () => onPinClick(p), isPicked(p));
+      const cull = vp && a.projectPixel;
+      for (const p of vg) {
+        if (cull) { const px = a.projectPixel(p.correctedGps); if (px && !inVP(px, 40)) continue; }
+        a.addDot(p, p.correctedGps, 'dot', () => onPinClick(p), isPicked(p));
+      }
     }
     updateStatus(undefined, { tooMany, useThumbs });
     return;
@@ -2004,14 +2023,17 @@ function renderMarkers() {
   // Thumbnails. Overlapping pins are merged into ONE representative thumbnail with
   // a "+count" badge (no radial fan). Zooming in splits the group naturally.
   const size = Settings.thumbSize;
-  const items = vg.map(p => ({ p, px: a.projectPixel ? a.projectPixel(p.correctedGps) : null }));
-  const haveProjection = items.every(it => it.px);
+  const all = vg.map(p => ({ p, px: a.projectPixel ? a.projectPixel(p.correctedGps) : null }));
+  const haveProjection = all.every(it => it.px);
 
   if (!haveProjection) {
-    for (const it of items) a.addThumb(it.p, it.p.correctedGps, size, () => onPinClick(it.p), isPicked(it.p));
+    for (const it of all) a.addThumb(it.p, it.p.correctedGps, size, () => onPinClick(it.p), isPicked(it.p));
     updateStatus(undefined, { tooMany, useThumbs });
     return;
   }
+
+  // Cull to the viewport (plus a thumbnail-sized margin) before grouping/drawing.
+  const items = vp ? all.filter(it => inVP(it.px, size * 2)) : all;
 
   // Merge thumbnails whose on-screen circles touch/overlap into one representative.
   // Threshold is wider than the thumbnail diameter so a dense blob collapses to a

@@ -2,7 +2,7 @@
    Caches the app shell + CDN libraries (so the page opens offline) and runtime-
    caches map tiles as they are viewed, so areas you've already browsed stay
    available without a connection. */
-const APP_CACHE = 'geophoto-app-v20';
+const APP_CACHE = 'geophoto-app-v21';
 const TILE_CACHE = 'geophoto-tiles-v1';
 
 const APP_ASSETS = [
