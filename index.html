@@ -296,7 +296,11 @@
     <div class="h-6 w-px bg-slate-200 mx-1"></div>
 
     <!-- Standalone primary features -->
-    <button id="albumBtn" class="px-3 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50" title="날짜별 사진 앨범으로 보기">📔 <span class="hidden sm:inline">앨범</span></button>
+    <button id="albumBtn" class="px-3 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50" title="날짜별 사진 앨범으로 보기">📔 <span class="hidden sm:inline" data-i18n="btn.album">앨범</span></button>
+
+    <button id="statsBtn" class="px-3 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50" title="여행 통계 대시보드">📊 <span class="hidden sm:inline" data-i18n="btn.stats">통계</span></button>
+
+    <button id="playBtn" class="px-3 py-1.5 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50" title="여행 경로 애니메이션 재생">▶ <span class="hidden sm:inline" data-i18n="btn.play">재생</span></button>
 
     <select id="exportSelect" class="text-sm border border-slate-300 rounded-md px-2 py-1.5 bg-white" title="데이터/앨범 내보내기">
       <option value="">⬇ 내보내기</option>
@@ -585,6 +589,17 @@
   }
 </style>
 
+<!-- ===== Travel statistics dashboard ===== -->
+<div id="statsModal" class="hidden fixed inset-0 bg-black/40 items-center justify-center p-4" style="z-index: 10000;">
+  <div class="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-auto">
+    <div class="flex items-center justify-between px-5 py-3 border-b border-slate-200 sticky top-0 bg-white/95 backdrop-blur z-10">
+      <h3 class="font-bold text-slate-700">📊 <span data-i18n="stats.title">여행 통계</span></h3>
+      <button id="statsClose" class="text-slate-400 hover:text-slate-700 text-2xl leading-none">×</button>
+    </div>
+    <div id="statsBody" class="p-5"></div>
+  </div>
+</div>
+
 <script>
 "use strict";
 /* =========================================================================
@@ -717,6 +732,67 @@ const Settings = {
   thumbSize: 56,      // px
   keys: { google: '', naver: '', kakao: '' },
 };
+
+/* ── i18n ──────────────────────────────────────────────────────────────────
+   Lightweight key→string dictionary. t(key) returns the active language's
+   string (falling back to Korean, then the key itself). applyLang() swaps text
+   on any element carrying data-i18n / data-i18n-title / data-i18n-ph. New JS-
+   built UI funnels its labels through t() so it switches instantly too. */
+const I18N = {
+  ko: {
+    'app.tagline': '사진으로 떠나는 지도 여행',
+    'btn.album': '앨범', 'btn.stats': '통계', 'btn.play': '재생', 'btn.save': '저장', 'btn.settings': '설정',
+    'menu.load': '불러오기', 'menu.map': '지도', 'menu.view': '보기', 'menu.tools': '도구',
+    'load.files': '개별 파일 선택', 'load.track': 'GPX 트랙으로 좌표 부여', 'load.project': '프로젝트 열기',
+    'map.provider': '지도 제공자', 'map.type': '지도 종류', 'map.cadastral': '지적편집도',
+    'view.thumb': '썸네일', 'view.density': '밀집 표시 (썸네일 OFF 시)', 'view.path': '이동 경로', 'view.fov': '화각 표시',
+    'tools.geocode': '지명 자동 채우기', 'tools.fav': '즐겨찾기만 보기', 'tools.compare': '비교 모드', 'tools.fitAll': '전체 보기',
+    'export.label': '⬇ 내보내기',
+    'stats.title': '여행 통계', 'stats.photos': '사진', 'stats.gpsPhotos': 'GPS 사진',
+    'stats.period': '여행 기간', 'stats.unitDays': '일', 'stats.places': '촬영지', 'stats.unitPlaces': '곳',
+    'stats.distance': '총 이동거리', 'stats.favorites': '즐겨찾기', 'stats.avgRating': '평균 별점',
+    'stats.topPlace': '최다 촬영지', 'stats.busiestDay': '가장 바쁜 날',
+    'stats.hourHist': '시간대별 촬영', 'stats.cameras': '카메라 사용 비율',
+    'stats.unitShots': '장', 'stats.empty': '사진을 먼저 불러오세요.', 'stats.peakHour': '최다 시간대',
+    'route.title': '여행 다시보기', 'route.play': '재생', 'route.pause': '일시정지', 'route.replay': '다시 재생',
+    'route.speed': '속도', 'route.exit': '닫기', 'route.empty': 'GPS 사진이 2장 이상 있어야 재생할 수 있어요.',
+  },
+  en: {
+    'app.tagline': 'A map journey through your photos',
+    'btn.album': 'Album', 'btn.stats': 'Stats', 'btn.play': 'Replay', 'btn.save': 'Save', 'btn.settings': 'Settings',
+    'menu.load': 'Load', 'menu.map': 'Map', 'menu.view': 'View', 'menu.tools': 'Tools',
+    'load.files': 'Choose individual files', 'load.track': 'Geotag with a GPX track', 'load.project': 'Open project',
+    'map.provider': 'Map provider', 'map.type': 'Map type', 'map.cadastral': 'Cadastral layer',
+    'view.thumb': 'Thumbnails', 'view.density': 'Dense display (thumbnails off)', 'view.path': 'Travel path', 'view.fov': 'Field of view',
+    'tools.geocode': 'Auto-fill place names', 'tools.fav': 'Favorites only', 'tools.compare': 'Compare mode', 'tools.fitAll': 'Fit all',
+    'export.label': '⬇ Export',
+    'stats.title': 'Travel stats', 'stats.photos': 'Photos', 'stats.gpsPhotos': 'Geotagged',
+    'stats.period': 'Trip length', 'stats.unitDays': 'days', 'stats.places': 'Places', 'stats.unitPlaces': 'spots',
+    'stats.distance': 'Distance', 'stats.favorites': 'Favorites', 'stats.avgRating': 'Avg rating',
+    'stats.topPlace': 'Most photographed', 'stats.busiestDay': 'Busiest day',
+    'stats.hourHist': 'Shots by hour', 'stats.cameras': 'Camera usage',
+    'stats.unitShots': 'shots', 'stats.empty': 'Load some photos first.', 'stats.peakHour': 'Peak hour',
+    'route.title': 'Trip replay', 'route.play': 'Play', 'route.pause': 'Pause', 'route.replay': 'Replay',
+    'route.speed': 'Speed', 'route.exit': 'Close', 'route.empty': 'Need at least 2 geotagged photos to replay.',
+  },
+};
+let LANG = (() => { try { return localStorage.getItem('geophoto.lang') || 'ko'; } catch (e) { return 'ko'; } })();
+function t(key) { const d = I18N[LANG] || I18N.ko; return (key in d) ? d[key] : (I18N.ko[key] != null ? I18N.ko[key] : key); }
+function applyLang() {
+  document.documentElement.lang = LANG;
+  document.querySelectorAll('[data-i18n]').forEach(el => { el.textContent = t(el.getAttribute('data-i18n')); });
+  document.querySelectorAll('[data-i18n-title]').forEach(el => { el.title = t(el.getAttribute('data-i18n-title')); });
+  document.querySelectorAll('[data-i18n-ph]').forEach(el => { el.placeholder = t(el.getAttribute('data-i18n-ph')); });
+}
+function setLang(l) {
+  LANG = (l === 'en') ? 'en' : 'ko';
+  try { localStorage.setItem('geophoto.lang', LANG); } catch (e) {}
+  applyLang();
+  // Re-render JS-built views that are currently visible.
+  if (State.albumOpen && typeof renderAlbum === 'function') renderAlbum();
+  const sm = document.getElementById('statsModal');
+  if (sm && !sm.classList.contains('hidden') && typeof renderDashboard === 'function') renderDashboard();
+}
 
 const LS_KEY = 'geophoto.settings.v1';
 
@@ -3207,6 +3283,111 @@ function wireSplitter() {
 }
 
 /* =========================================================================
+   Travel statistics dashboard — distance, places, period, hour histogram,
+   camera usage. All derived on the fly from the loaded photos (no backend).
+   ========================================================================= */
+function computeTripStats() {
+  const all = State.detailList || [];
+  const geo = (State.geo || []).slice().sort((a, b) => a.timestamp - b.timestamp);
+  const s = { totalPhotos: (State.photos || []).length, gpsPhotos: geo.length };
+  const times = all.map(p => p.timestamp).filter(x => x);
+  if (times.length) {
+    s.start = Math.min(...times); s.end = Math.max(...times);
+    const days = new Set(all.map(p => { const d = new Date(p.timestamp); d.setHours(0, 0, 0, 0); return +d; }));
+    s.days = days.size;
+  } else { s.days = 0; s.start = s.end = null; }
+  let dist = 0;
+  for (let i = 1; i < geo.length; i++) dist += haversine(geo[i - 1].correctedGps, geo[i].correctedGps);
+  s.distanceKm = dist / 1000;
+  s.places = (State.clusters || []).length;
+  let top = null;
+  for (const c of (State.clusters || [])) if (!top || c.items.length > top.items.length) top = c;
+  s.topCluster = top;
+  s.topPlaceCount = top ? top.items.length : 0;
+  s.topPlaceName = top ? ((top.items.find(p => p.placeName) || {}).placeName || null) : null;
+  const hours = new Array(24).fill(0);
+  for (const p of all) if (p.timestamp) hours[new Date(p.timestamp).getHours()]++;
+  s.hours = hours;
+  s.peakHour = hours.indexOf(Math.max(...hours));
+  const dayCount = {};
+  for (const p of all) if (p.timestamp) { const d = new Date(p.timestamp); d.setHours(0, 0, 0, 0); const k = +d; dayCount[k] = (dayCount[k] || 0) + 1; }
+  let bestDay = null, bestN = 0; for (const k in dayCount) if (dayCount[k] > bestN) { bestN = dayCount[k]; bestDay = +k; }
+  s.busiestDay = bestDay; s.busiestDayCount = bestN;
+  const cam = {};
+  for (const p of all) { const e = p.exif || {}; const name = [e.make, e.model].filter(Boolean).join(' ').trim(); if (name) cam[name] = (cam[name] || 0) + 1; }
+  s.cameras = Object.entries(cam).sort((a, b) => b[1] - a[1]);
+  s.cameraKnown = s.cameras.reduce((tot, [, n]) => tot + n, 0);
+  s.favorites = all.filter(p => p.attrs && p.attrs.fav).length;
+  const rated = all.filter(p => p.attrs && p.attrs.rating > 0);
+  s.avgRating = rated.length ? (rated.reduce((tot, p) => tot + p.attrs.rating, 0) / rated.length) : 0;
+  return s;
+}
+function fmtKm(km) { return (km >= 100 ? Math.round(km) : Math.round(km * 10) / 10).toLocaleString(); }
+function fmtDateShort(ms) { if (ms == null) return '—'; const d = new Date(ms); const p = n => String(n).padStart(2, '0'); return `${d.getFullYear()}.${p(d.getMonth() + 1)}.${p(d.getDate())}`; }
+function hourHistSVG(hours, peak) {
+  const w = 600, h = 122, n = 24, max = Math.max(1, ...hours), bw = w / n, base = h - 18;
+  let bars = '';
+  for (let i = 0; i < n; i++) {
+    const bh = Math.round((hours[i] / max) * (base - 6));
+    const x = i * bw, y = base - bh;
+    bars += `<rect x="${(x + 1.5).toFixed(1)}" y="${y}" width="${(bw - 3).toFixed(1)}" height="${bh}" rx="2" fill="${i === peak ? '#2563eb' : '#93c5fd'}"/>`;
+    if (i % 3 === 0) bars += `<text x="${(x + bw / 2).toFixed(1)}" y="${h - 4}" font-size="10" fill="#94a3b8" text-anchor="middle">${i}</text>`;
+  }
+  return `<svg viewBox="0 0 ${w} ${h}" width="100%" style="display:block">${bars}</svg>`;
+}
+function renderDashboard() {
+  const body = $('statsBody'); if (!body) return;
+  const s = computeTripStats();
+  if (!s.totalPhotos) { body.innerHTML = `<div class="text-center text-slate-400 py-16">${t('stats.empty')} 📁</div>`; return; }
+  const card = (label, value, sub) => `<div class="bg-slate-50 rounded-lg p-3">
+      <div class="text-[11px] text-slate-400 font-medium">${label}</div>
+      <div class="text-xl font-bold text-slate-700 leading-tight mt-0.5">${value}</div>
+      ${sub ? `<div class="text-[11px] text-slate-400 mt-0.5">${sub}</div>` : ''}</div>`;
+  const range = (s.start != null) ? `${fmtDateShort(s.start)} – ${fmtDateShort(s.end)}` : '';
+  const wd = (LANG === 'en') ? ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] : ['일', '월', '화', '수', '목', '금', '토'];
+  const busiest = s.busiestDay != null ? `${fmtDateShort(s.busiestDay)} (${wd[new Date(s.busiestDay).getDay()]})` : '—';
+  const hu = (LANG === 'en') ? 'h' : '시';
+  const metrics = `<div class="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+    ${card(t('stats.photos'), s.totalPhotos.toLocaleString(), 'GPS ' + s.gpsPhotos.toLocaleString())}
+    ${card(t('stats.period'), s.days + ' ' + t('stats.unitDays'), range)}
+    ${card(t('stats.places'), s.places + ' ' + t('stats.unitPlaces'), '')}
+    ${card(t('stats.distance'), fmtKm(s.distanceKm) + ' km', '')}
+    ${card(t('stats.favorites'), '♥ ' + s.favorites.toLocaleString(), '')}
+    ${card(t('stats.avgRating'), s.avgRating ? ('★ ' + (Math.round(s.avgRating * 10) / 10)) : '—', '')}</div>`;
+  const highlight = `<div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 mt-2.5">
+    <div class="bg-blue-50 rounded-lg p-3">
+      <div class="text-[11px] text-blue-500 font-medium">📍 ${t('stats.topPlace')}</div>
+      <div class="text-base font-bold text-slate-700 mt-0.5 truncate" id="statsTopPlace">${s.topPlaceName || '—'}</div>
+      <div class="text-[11px] text-slate-400">${s.topPlaceCount.toLocaleString()} ${t('stats.unitShots')}</div></div>
+    <div class="bg-amber-50 rounded-lg p-3">
+      <div class="text-[11px] text-amber-600 font-medium">📅 ${t('stats.busiestDay')}</div>
+      <div class="text-base font-bold text-slate-700 mt-0.5">${busiest}</div>
+      <div class="text-[11px] text-slate-400">${s.busiestDayCount.toLocaleString()} ${t('stats.unitShots')}</div></div></div>`;
+  const hist = `<div class="mt-4">
+    <div class="text-xs font-semibold text-slate-500 mb-1.5">⏰ ${t('stats.hourHist')} <span class="font-normal text-slate-400">· ${t('stats.peakHour')} ${s.peakHour}${hu}</span></div>
+    ${hourHistSVG(s.hours, s.peakHour)}</div>`;
+  const camRows = s.cameras.slice(0, 5).map(([name, count]) => {
+    const pct = Math.round(100 * count / s.cameraKnown);
+    return `<div class="flex items-center gap-2 text-xs">
+      <div class="w-28 sm:w-36 truncate text-slate-600" title="${name.replace(/"/g, '&quot;')}">${name}</div>
+      <div class="flex-1 bg-slate-100 rounded-full h-3 overflow-hidden"><div class="h-full bg-blue-500 rounded-full" style="width:${pct}%"></div></div>
+      <div class="w-16 text-right text-slate-400">${count.toLocaleString()} · ${pct}%</div></div>`;
+  }).join('');
+  const cameras = s.cameras.length ? `<div class="mt-4">
+    <div class="text-xs font-semibold text-slate-500 mb-1.5">📷 ${t('stats.cameras')}</div>
+    <div class="space-y-1.5">${camRows}</div></div>` : '';
+  body.innerHTML = metrics + highlight + hist + cameras;
+  if (s.topCluster && !s.topPlaceName) {
+    reverseGeocode(s.topCluster.center.lat, s.topCluster.center.lng).then(name => {
+      const el = $('statsTopPlace'); if (name && el) el.textContent = name;
+      if (name) s.topCluster.items.forEach(p => { if (!p.placeName) p.placeName = name; });
+    }).catch(() => {});
+  }
+}
+function openDashboard() { const m = $('statsModal'); renderDashboard(); m.classList.remove('hidden'); m.classList.add('flex'); }
+function closeDashboard() { const m = $('statsModal'); m.classList.add('hidden'); m.classList.remove('flex'); }
+
+/* =========================================================================
    Event wiring
    ========================================================================= */
 function $(id) { return document.getElementById(id); }
@@ -3255,6 +3436,11 @@ function init() {
   // Album (day-by-day photo grid)
   $('albumBtn').addEventListener('click', toggleAlbum);
   $('albumClose').addEventListener('click', closeAlbum);
+
+  // Statistics dashboard
+  $('statsBtn').addEventListener('click', openDashboard);
+  $('statsClose').addEventListener('click', closeDashboard);
+  $('statsModal').addEventListener('click', e => { if (e.target.id === 'statsModal') closeDashboard(); });
 
   // Project save / load / re-attach originals
   $('saveProjectBtn').addEventListener('click', saveProject);
@@ -3358,6 +3544,8 @@ function init() {
       document.querySelectorAll('.cmp-panel .cmp-vp').forEach(vp => { const img = vp.querySelector('img'); if (img) fitContain(vp, img); });
     }
   });
+
+  applyLang(); // localize any data-i18n elements for the stored language
 
   // Show the keyless OpenStreetMap immediately so there's a live map before any
   // photos are loaded. The empty-state hint stays visible until a folder is chosen.
