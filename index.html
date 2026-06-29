@@ -793,6 +793,7 @@ const I18N = {
     'ol.title': 'GPS 이상치', 'ol.usingCorrected': '보정 위치 사용 중', 'ol.usingOriginal': '원본 위치 사용 중',
     'ol.moved': '이동', 'ol.corrected': '보정 위치', 'ol.original': '원본 위치',
     'cmp8': '북,북동,동,남동,남,남서,서,북서',
+    'rv.kakao': '🛣 카카오 로드뷰', 'rv.google': '🛰 구글 스트리트뷰',
   },
   en: {
     'app.tagline': 'A map journey through your photos',
@@ -843,6 +844,7 @@ const I18N = {
     'ol.title': 'GPS outlier', 'ol.usingCorrected': 'using corrected location', 'ol.usingOriginal': 'using original location',
     'ol.moved': 'moved', 'ol.corrected': 'Corrected', 'ol.original': 'Original',
     'cmp8': 'N,NE,E,SE,S,SW,W,NW',
+    'rv.kakao': '🛣 Kakao Roadview', 'rv.google': '🛰 Google Street View',
   },
 };
 let LANG = (() => { try { return localStorage.getItem('geophoto.lang') || 'ko'; } catch (e) { return 'ko'; } })();
@@ -2006,29 +2008,22 @@ function spreadLayout(n, size) {
 }
 
 // Draw a field-of-view triangle (apex at the GPS point, spreading toward the
-// shooting direction). The opening angle is the real angle of view from EXIF
-// focal length; the bearing is the measured EXIF compass direction when present
-// (solid), otherwise inferred from the travel direction (dashed/amber).
+// shooting direction). The opening angle is the real angle of view from the EXIF
+// focal length; the bearing is the camera's RECORDED compass heading
+// (GPSImgDirection). Photos without a recorded heading are skipped on purpose —
+// guessing a direction from the travel path is frequently wrong, so we never
+// fabricate one. Only measured headings are shown.
 function drawFovCones(a, list) {
   if (!a.drawFov) return;
   const cones = [];
-  let measured = 0;
-  for (let i = 0; i < list.length; i++) {
-    const p = list[i], c = p.correctedGps;
-    let dir = (p.direction != null) ? p.direction : null;
-    let inferred = false;
-    if (dir == null) {
-      const prev = list[i - 1], next = list[i + 1];
-      if (prev) dir = bearing(prev.correctedGps, c);
-      else if (next) dir = bearing(c, next.correctedGps);
-      if (dir != null) inferred = true;
-    } else { measured++; }
-    if (dir == null) continue;
+  for (const p of list) {
+    if (p.direction == null) continue; // no recorded heading → don't guess, don't draw
+    const c = p.correctedGps;
     const half = fovAngle(p) / 2;
     const D = Math.max(15, 70 * metersPerPixel(a, c)); // ~70px long, zoom-adaptive
-    cones.push({ pts: [c, destinationPoint(c.lat, c.lng, dir - half, D), destinationPoint(c.lat, c.lng, dir + half, D)], inferred });
+    cones.push({ pts: [c, destinationPoint(c.lat, c.lng, p.direction - half, D), destinationPoint(c.lat, c.lng, p.direction + half, D)], inferred: false });
   }
-  State._fovMeasured = measured; State._fovTotal = list.length;
+  State._fovMeasured = cones.length; State._fovTotal = list.length;
   if (cones.length) a.drawFov(cones);
 }
 
@@ -2209,6 +2204,11 @@ function renderDetailMeta(photo) {
     if (photo.fromTrack) badges.push(`<span class="badge bg-sky-100 text-sky-700">${t('mt.track')}</span>`);
     if (badges.length) html += `<div class="mt-1">${badges.join(' ')}</div>`;
     if (photo.isOutlier && photo.originalGps) html += `<div class="text-slate-400">${t('mt.original')} ${photo.originalGps.lat.toFixed(6)}, ${photo.originalGps.lng.toFixed(6)}</div>`;
+    const rh = (photo.direction != null) ? Math.round(photo.direction) : '';
+    html += `<div class="mt-1.5 flex flex-wrap gap-1.5">` +
+      `<button type="button" class="badge bg-slate-100 text-slate-600 hover:bg-slate-200 rv-btn" data-rv="kakao">${t('rv.kakao')}</button>` +
+      `<button type="button" class="badge bg-slate-100 text-slate-600 hover:bg-slate-200 rv-btn" data-rv="google" data-h="${rh}">${t('rv.google')}</button>` +
+    `</div>`;
   } else {
     html += `<div><span class="badge bg-slate-200 text-slate-500">${t('mt.noGps')}</span></div>`;
   }
@@ -2227,6 +2227,18 @@ function renderDetailMeta(photo) {
   el.innerHTML = html;
   const rb = document.getElementById('reattachBtn');
   if (rb) rb.onclick = () => $('reattachInput').click();
+  el.querySelectorAll('.rv-btn').forEach(b => {
+    b.onclick = () => openRoadview(b.dataset.rv, photo.correctedGps.lat, photo.correctedGps.lng, b.dataset.h);
+  });
+}
+// Open an external road-level view at the photo's location. Kakao Roadview for
+// Korea; Google Street View works worldwide and accepts a heading — but only the
+// camera's REAL recorded heading is passed (never a guessed one).
+function openRoadview(kind, lat, lng, heading) {
+  const url = (kind === 'kakao')
+    ? `https://map.kakao.com/link/roadview/${lat},${lng}`
+    : `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${lat},${lng}${heading ? `&heading=${heading}` : ''}`;
+  window.open(url, '_blank', 'noopener,noreferrer');
 }
 function compass8(deg) {
   const dirs = t('cmp8').split(',');
